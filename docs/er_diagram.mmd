@@ -1,0 +1,242 @@
+erDiagram
+    USERS ||--o{ USER_ROLES : has
+    ROLES ||--o{ USER_ROLES : assigned
+    ROLES ||--o{ ROLE_PERMISSIONS : grants
+    PERMISSIONS ||--o{ ROLE_PERMISSIONS : defines
+    USERS ||--o{ TEAM_MEMBERSHIPS : joins
+    TEAMS ||--o{ TEAM_MEMBERSHIPS : contains
+    TEAMS ||--o{ QUEUES : owns
+    USERS ||--o{ QUEUE_MEMBERSHIPS : receives
+    QUEUES ||--o{ QUEUE_MEMBERSHIPS : restricts
+
+    USERS ||--o{ TICKETS : requests
+    USERS o|--o{ TICKETS : assigned_to
+    QUEUES ||--o{ TICKETS : routes
+    CATEGORIES ||--o{ TICKETS : categorizes
+    CATEGORIES o|--o{ CATEGORIES : parent_of
+    CATEGORIES ||--o{ CATEGORY_FIELDS : configures
+    SLAPOLICIES o|--o{ CATEGORIES : default_policy
+
+    TICKETS ||--o{ TICKET_COMMENTS : contains
+    USERS ||--o{ TICKET_COMMENTS : authors
+    TICKET_COMMENTS o|--o{ TICKET_ATTACHMENTS : includes
+    TICKETS ||--o{ TICKET_ATTACHMENTS : has
+    USERS ||--o{ TICKET_ATTACHMENTS : uploads
+    TICKETS ||--o{ TICKET_STATUS_HISTORY : records
+    USERS o|--o{ TICKET_STATUS_HISTORY : changes
+    TICKETS ||--o| TICKET_SLAS : measures
+    SLATARGETS ||--o{ TICKET_SLAS : snapshots
+    TICKETS ||--o{ TICKET_FOLLOWERS : follows
+    USERS ||--o{ TICKET_FOLLOWERS : subscribes
+    TICKETS ||--o{ TIME_ENTRIES : logs
+    USERS ||--o{ TIME_ENTRIES : records
+    TICKETS o|--o{ TICKETS : merged_into
+
+    BUSINESS_CALENDARS ||--o{ BUSINESS_HOURS : defines
+    BUSINESS_CALENDARS ||--o{ HOLIDAYS : excludes
+    BUSINESS_CALENDARS ||--o{ SLAPOLICIES : schedules
+    SLAPOLICIES ||--|{ SLATARGETS : defines
+
+    USERS ||--o{ NOTIFICATIONS : receives
+    TICKETS o|--o{ NOTIFICATIONS : concerns
+    USERS o|--o{ EMAIL_OUTBOX : recipient
+    TICKETS o|--o{ EMAIL_OUTBOX : concerns
+    USERS o|--o{ AUDIT_EVENTS : acts
+    TICKETS ||--o{ SATISFACTION_SURVEYS : evaluated_by
+    USERS ||--o{ SATISFACTION_SURVEYS : responds
+
+    CATEGORIES o|--o{ KNOWLEDGE_ARTICLES : classifies
+    USERS ||--o{ KNOWLEDGE_ARTICLES : authors
+    KNOWLEDGE_ARTICLES ||--o{ KNOWLEDGE_FEEDBACK : receives
+    USERS ||--o{ KNOWLEDGE_FEEDBACK : submits
+    USERS ||--o{ MACROS : authors
+    QUEUES o|--o{ MACROS : scopes
+    USERS ||--o{ SAVED_FILTERS : owns
+    QUEUES o|--o{ SAVED_FILTERS : scopes
+
+    USERS {
+        uuid id PK
+        string username UK
+        string email_normalized UK
+        string identity_provider
+        string external_subject
+        boolean is_active
+    }
+    ROLES {
+        uuid id PK
+        string code UK
+        string name
+    }
+    PERMISSIONS {
+        uuid id PK
+        string code UK
+        string description
+    }
+    TEAMS {
+        uuid id PK
+        string code UK
+        string name
+    }
+    QUEUES {
+        uuid id PK
+        string code UK
+        uuid team_id FK
+    }
+    CATEGORIES {
+        uuid id PK
+        string code
+        uuid parent_id FK
+        uuid default_sla_policy_id FK
+    }
+    CATEGORY_FIELDS {
+        uuid id PK
+        uuid category_id FK
+        string field_key
+        string field_type
+        json options
+    }
+    TICKETS {
+        uuid id PK
+        string ticket_number UK
+        string status
+        string priority
+        uuid requester_id FK
+        uuid assignee_id FK
+        uuid queue_id FK
+        uuid category_id FK
+        uuid subcategory_id FK
+        json custom_fields
+    }
+    TICKET_COMMENTS {
+        uuid id PK
+        uuid ticket_id FK
+        uuid author_id FK
+        string visibility
+        text body_markdown
+    }
+    TICKET_ATTACHMENTS {
+        uuid id PK
+        uuid ticket_id FK
+        uuid comment_id FK
+        string storage_key UK
+        string detected_mime_type
+        integer size_bytes
+        string sha256
+    }
+    TICKET_STATUS_HISTORY {
+        uuid id PK
+        uuid ticket_id FK
+        string from_status
+        string to_status
+        uuid changed_by_id FK
+    }
+    TICKET_SLAS {
+        uuid id PK
+        uuid ticket_id FK
+        uuid sla_target_id FK
+        datetime first_response_due_at
+        datetime resolution_due_at
+        boolean is_paused
+    }
+    BUSINESS_CALENDARS {
+        uuid id PK
+        string code UK
+        string timezone_name
+    }
+    BUSINESS_HOURS {
+        uuid id PK
+        uuid calendar_id FK
+        integer weekday
+        time starts_at
+        time ends_at
+    }
+    HOLIDAYS {
+        uuid id PK
+        uuid calendar_id FK
+        date holiday_date
+        string scope
+    }
+    SLAPOLICIES {
+        uuid id PK
+        string code UK
+        uuid calendar_id FK
+    }
+    SLATARGETS {
+        uuid id PK
+        uuid sla_policy_id FK
+        string priority
+        integer first_response_minutes
+        integer resolution_minutes
+    }
+    NOTIFICATIONS {
+        uuid id PK
+        uuid user_id FK
+        uuid ticket_id FK
+        string notification_type
+        datetime read_at
+    }
+    EMAIL_OUTBOX {
+        uuid id PK
+        string recipient_email
+        uuid user_id FK
+        uuid ticket_id FK
+        string status
+        string idempotency_key UK
+    }
+    AUDIT_EVENTS {
+        uuid id PK
+        uuid actor_id FK
+        string entity_type
+        string entity_id
+        string action
+        json before_data
+        json after_data
+    }
+    SATISFACTION_SURVEYS {
+        uuid id PK
+        uuid ticket_id FK
+        uuid requester_id FK
+        integer resolution_cycle
+        integer score
+    }
+    KNOWLEDGE_ARTICLES {
+        uuid id PK
+        string slug UK
+        string status
+        string visibility
+        uuid category_id FK
+        uuid author_id FK
+    }
+    KNOWLEDGE_FEEDBACK {
+        uuid id PK
+        uuid article_id FK
+        uuid user_id FK
+        boolean was_helpful
+    }
+    MACROS {
+        uuid id PK
+        string name
+        uuid queue_id FK
+        uuid author_id FK
+    }
+    SAVED_FILTERS {
+        uuid id PK
+        uuid owner_id FK
+        string name
+        json filters
+    }
+    TIME_ENTRIES {
+        uuid id PK
+        uuid ticket_id FK
+        uuid user_id FK
+        integer minutes_spent
+    }
+    TICKET_FOLLOWERS {
+        uuid id PK
+        uuid ticket_id FK
+        uuid user_id FK
+    }
+    TICKET_COUNTERS {
+        integer year PK
+        integer last_number
+    }

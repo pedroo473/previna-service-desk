@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block title %}Novo chamado | {{ app_title }}{% endblock %}
+{% block content %}
+<div class="breadcrumb"><a href="{{ url_for('index') }}">Chamados</a><span>/</span><span>Novo chamado</span></div>
+<section class="form-page-heading"><span class="eyebrow">NOVA SOLICITAÇÃO</span><h1>Abra um chamado de TI</h1><p>Descreva o que está acontecendo para facilitar o diagnóstico e o atendimento.</p></section>
+<section class="form-panel">
+  <form method="post" class="form-stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field-block"><label for="title">Assunto <span class="required">*</span></label><input id="title" name="title" value="{{ form.get('title', '') }}" maxlength="120" placeholder="Ex.: Computador não conecta à rede" required><small>Resuma o problema em uma frase.</small></div>
+    <div class="field-row">
+      <div class="field-block"><label for="category">Categoria <span class="required">*</span></label><select id="category" name="category" required><option value="">Selecione uma categoria</option>{% for item in categories %}<option value="{{ item }}" {% if form.get('category') == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+      <div class="field-block"><label for="priority">Prioridade <span class="required">*</span></label><select id="priority" name="priority" required>{% for item in priorities %}<option value="{{ item }}" {% if form.get('priority', 'Normal') == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select><small>Use “Urgente” apenas quando o impacto justificar.</small></div>
+    </div>
+    <div class="field-block"><label for="description">Descrição do problema <span class="required">*</span></label><textarea id="description" name="description" rows="7" maxlength="4000" placeholder="Informe o que ocorreu, desde quando, a mensagem de erro e o impacto no trabalho. Não inclua senhas." required>{{ form.get('description', '') }}</textarea><small>Até 4.000 caracteres. Não informe senhas nem dados pessoais desnecessários.</small></div>
+    <div class="form-actions"><a class="button button-quiet" href="{{ url_for('index') }}">Cancelar</a><button class="button" type="submit">Registrar chamado <span>→</span></button></div>
+  </form>
+</section>
+{% endblock %}

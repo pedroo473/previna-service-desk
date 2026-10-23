@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#152b46">
+  <title>{% block title %}{{ app_title }}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="{% if current_user %}authenticated-layout{% else %}public-layout{% endif %}">
+  {% if current_user %}
+  <div class="app-shell">
+    <aside class="app-sidebar" aria-label="Navegação principal">
+      <a class="brand sidebar-brand" href="{{ url_for('index') }}" aria-label="Previna Service Desk — página inicial">
+        <span class="brand-mark">P</span>
+        <span class="brand-copy"><strong>PREVINA</strong><small>Service Desk</small></span>
+      </a>
+
+      <div class="sidebar-section-title">ESPAÇO DE TRABALHO</div>
+      <nav class="side-nav">
+        <a class="side-nav-item {% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}" {% if request.endpoint == 'index' %}aria-current="page"{% endif %}>
+          <span class="side-nav-icon" aria-hidden="true">▦</span><span>Visão geral</span>
+        </a>
+        <a class="side-nav-item {% if request.endpoint == 'new_ticket' %}active{% endif %}" href="{{ url_for('new_ticket') }}" {% if request.endpoint == 'new_ticket' %}aria-current="page"{% endif %}>
+          <span class="side-nav-icon side-nav-plus" aria-hidden="true">＋</span><span>Novo chamado</span>
+        </a>
+        <a class="side-nav-item {% if request.endpoint in ['notifications', 'open_notification', 'notification_summary'] %}active{% endif %}" href="{{ url_for('notifications') }}" {% if request.endpoint == 'notifications' %}aria-current="page"{% endif %}>
+          <span class="side-nav-icon" aria-hidden="true">♧</span><span>Notificações</span>
+          {% if unread_notification_count %}<span class="side-nav-count">{{ unread_notification_count }}</span>{% endif %}
+        </a>
+        {% if current_user['role'] == 'ti' %}
+        <a class="side-nav-item {% if request.endpoint == 'audit_log' %}active{% endif %}" href="{{ url_for('audit_log') }}" {% if request.endpoint == 'audit_log' %}aria-current="page"{% endif %}>
+          <span class="side-nav-icon" aria-hidden="true">≡</span><span>Auditoria</span>
+        </a>
+        {% endif %}
+      </nav>
+
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-help-card">
+        <span class="sidebar-help-icon" aria-hidden="true">?</span>
+        <strong>Precisa de suporte?</strong>
+        <p>Registre sua solicitação para acompanhar o atendimento em um só lugar.</p>
+        <a href="{{ url_for('new_ticket') }}">Abrir chamado <span aria-hidden="true">→</span></a>
+      </div>
+      <div class="sidebar-profile">
+        <span class="profile-avatar">{{ current_user['full_name'][:1]|upper }}</span>
+        <span class="profile-details"><strong>{{ current_user['full_name'] }}</strong><small>{% if current_user['role'] == 'ti' %}Equipe de TI{% else %}Solicitante{% endif %}</small></span>
+        <form action="{{ url_for('logout') }}" method="post" class="inline-form sidebar-logout-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="sidebar-logout" type="submit" aria-label="Sair da conta" title="Sair">↗</button>
+        </form>
+      </div>
+    </aside>
+
+    <div class="app-main">
+      <header class="topbar app-topbar">
+        <div class="topbar-context">
+          <div class="topbar-breadcrumb"><span>PREVINA</span><span class="breadcrumb-slash">/</span><strong>Central de serviços</strong></div>
+          <span class="topbar-subtitle">Atendimento interno de Tecnologia da Informação</span>
+        </div>
+        <div class="top-actions app-top-actions">
+          <a class="topbar-notification" href="{{ url_for('notifications') }}" aria-label="Notificações{% if unread_notification_count %}, {{ unread_notification_count }} não lidas{% endif %}" title="Notificações">
+            <span aria-hidden="true">♧</span>{% if unread_notification_count %}<span class="topbar-notification-count">{{ unread_notification_count }}</span>{% endif %}
+          </a>
+          <a class="button topbar-new-ticket" href="{{ url_for('new_ticket') }}"><span aria-hidden="true">＋</span> Novo chamado</a>
+        </div>
+      </header>
+  {% else %}
+  <header class="public-topbar">
+    <a class="brand public-brand" href="{{ url_for('login') }}">
+      <span class="brand-mark">P</span>
+      <span class="brand-copy"><strong>PREVINA</strong><small>Service Desk</small></span>
+    </a>
+    <span class="public-header-label"><span class="public-header-dot"></span> Portal interno de atendimento</span>
+  </header>
+  {% endif %}
+
+  <main class="page-shell {% if current_user %}app-page-shell{% else %}public-page-shell{% endif %}">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}<div class="flash-stack" aria-live="polite">
+        {% for category, message in messages %}<div class="flash flash-{{ category }}">{{ message }}</div>{% endfor %}
+      </div>{% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+
+  {% if current_user %}
+      <footer class="footer app-footer"><span>PREVINA</span><span class="footer-dot">·</span> Service Desk <span class="footer-spacer"></span><span>Suporte e Infraestrutura de TI</span></footer>
+    </div>
+  </div>
+  {% else %}
+  <footer class="footer public-footer"><span>PREVINA</span><span class="footer-dot">·</span> Service Desk <span class="footer-spacer"></span> Acesso restrito a colaboradores autorizados</footer>
+  {% endif %}
+  {% if current_user %}<div id="live-notification-stack" class="live-notification-stack" aria-live="polite" aria-atomic="false"></div><script src="{{ url_for('static', filename='app.js') }}" defer></script>{% endif %}
+</body>
+</html>

@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% block title %}Chamado #{{ ticket['id'] }} | {{ app_title }}{% endblock %}
+{% block content %}
+<div class="breadcrumb"><a href="{{ url_for('index') }}">Chamados</a><span>/</span><span>Chamado #{{ ticket['id'] }}</span></div>
+<section class="detail-heading"><div><span class="eyebrow">CHAMADO #{{ ticket['id'] }}</span><h1>{{ ticket['title'] }}</h1><p class="muted">Aberto por {{ ticket['requester_name'] }} em {{ ticket['created_at']|datetime_br }}</p></div><span class="status status-{{ ticket['status']|replace(' ', '-')|replace('ã','a')|replace('á','a')|lower }} status-large">{{ ticket['status'] }}</span></section>
+<div class="detail-grid">
+  <div class="detail-main">
+    <section class="panel detail-panel"><div class="panel-heading"><h2>Descrição da solicitação</h2></div><div class="description-body">{{ ticket['description'] }}</div><div class="metadata-grid"><div><span>Categoria</span><strong>{{ ticket['category'] }}</strong></div><div><span>Prioridade</span><strong><span class="priority priority-{{ ticket['priority']|lower }}">{{ ticket['priority'] }}</span></strong></div><div><span>Última atualização</span><strong>{{ ticket['updated_at']|datetime_br }}</strong></div></div></section>
+    <section class="panel conversation-panel"><div class="panel-heading"><div><h2>Histórico do atendimento</h2><p class="muted">Comentários e alterações ficam registrados.</p></div></div>
+      <div class="timeline">{% for comment in comments %}<article class="timeline-item"><div class="timeline-avatar {% if comment['author_role'] == 'ti' %}avatar-ti{% endif %}">{{ comment['author_name'][:1]|upper }}</div><div class="timeline-content"><div class="comment-meta"><strong>{{ comment['author_name'] }}</strong>{% if comment['author_role'] == 'ti' %}<span class="mini-tag">TI</span>{% endif %}<time>{{ comment['created_at']|datetime_br }}</time></div><p>{{ comment['body'] }}</p></div></article>{% endfor %}</div>
+      <form method="post" class="comment-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label for="body">Adicionar comentário</label><textarea id="body" name="body" rows="3" maxlength="2000" placeholder="Informe detalhes adicionais ou responda à equipe de TI..."></textarea><div class="comment-actions"><small>Não inclua senhas ou informações sensíveis desnecessárias.</small><button type="submit" class="button">Enviar comentário</button></div></form>
+    </section>
+  </div>
+  <aside class="detail-sidebar">
+    <section class="panel side-panel"><h2>Resumo</h2><dl class="summary-list"><div><dt>Solicitante</dt><dd>{{ ticket['requester_name'] }}</dd></div><div><dt>Número</dt><dd>#{{ ticket['id'] }}</dd></div><div><dt>Aberto em</dt><dd>{{ ticket['created_at']|datetime_br }}</dd></div><div><dt>Prioridade</dt><dd>{{ ticket['priority'] }}</dd></div></dl></section>
+    {% if is_technician %}<section class="panel side-panel"><h2>Gerenciar chamado</h2><p class="muted small-copy">Altere o status conforme o andamento real do atendimento.</p><form method="post" class="form-stack"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="update_status" value="1"><label for="status">Status</label><select id="status" name="status">{% for item in statuses %}<option value="{{ item }}" {% if ticket['status'] == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select><button class="button button-full" type="submit">Atualizar status</button></form></section>{% endif %}
+  </aside>
+</div>
+{% endblock %}

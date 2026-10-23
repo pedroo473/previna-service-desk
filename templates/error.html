@@ -1,0 +1,5 @@
+{% extends 'base.html' %}
+{% block title %}Erro {{ code }} | {{ app_title }}{% endblock %}
+{% block content %}
+<section class="empty-state error-state"><div class="empty-icon">{{ code }}</div><h1>Não foi possível concluir</h1><p>{{ message }}</p><a class="button" href="{{ url_for('index') if current_user else url_for('login') }}">Voltar</a></section>
+{% endblock %}

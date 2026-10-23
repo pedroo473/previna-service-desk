@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% block title %}Entrar | {{ app_title }}{% endblock %}
+{% block content %}
+<section class="login-layout">
+  <div class="login-intro">
+    <span class="eyebrow">SUPORTE INTERNO</span>
+    <h1>O que precisa de suporte hoje?</h1>
+    <p>Abra um chamado, acompanhe o andamento e mantenha as solicitações de TI organizadas em um único lugar.</p>
+    <div class="intro-points"><span>✓ Solicitações registradas</span><span>✓ Histórico de atendimento</span><span>✓ Acompanhamento de status</span></div>
+  </div>
+  <div class="login-card">
+    <div class="card-icon">↗</div>
+    <h2>Acessar a central</h2>
+    <p class="muted">Use as credenciais fornecidas pela equipe de TI.</p>
+    <form method="post" class="form-stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ request.args.get('next', '') }}">
+      <label for="username">Usuário</label>
+      <input id="username" name="username" type="text" autocomplete="username" maxlength="50" required autofocus>
+      <label for="password">Senha</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button class="button button-full" type="submit">Entrar na central <span>→</span></button>
+    </form>
+    <p class="help-text">Não possui acesso? Solicite a criação de uma conta à equipe de TI.</p>
+  </div>
+</section>
+{% endblock %}
