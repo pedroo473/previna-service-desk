@@ -105,6 +105,18 @@ def backup_sqlite_database(database_path: Path) -> Path:
     return target
 
 
+def ensure_demo_database_isolated(app: Flask) -> None:
+    """Impede a rotina de demonstração de usar o banco padrão da aplicação."""
+    explicit_database = os.environ.get("PREVINA_DATABASE", "").strip()
+    default_database = (PROJECT_ROOT / "instance" / "chamados.sqlite3").resolve()
+    configured_database = Path(str(app.config["DATABASE"])).resolve()
+    if not explicit_database or configured_database == default_database:
+        raise click.ClickException(
+            "Operação de demonstração bloqueada. Defina PREVINA_DATABASE para um arquivo SQLite exclusivo "
+            "(por exemplo, instance/demonstracao.sqlite3). Nenhum dado foi alterado."
+        )
+
+
 def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     secret = (test_config or {}).get("SECRET_KEY") or os.environ.get("FLASK_SECRET_KEY")
     if not secret:
@@ -508,6 +520,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     def seed_demo_data_command() -> None:
         if not app.config["DEMO_MODE"]:
             raise click.ClickException("Bloqueado. Defina DEMO_MODE=true apenas em uma base de demonstração.")
+        ensure_demo_database_isolated(app)
         password = os.environ.get("DEMO_SEED_PASSWORD", "")
         if len(password) < 10:
             raise click.ClickException("Defina DEMO_SEED_PASSWORD com no mínimo 10 caracteres.")
@@ -555,6 +568,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     def clean_demo_data_command() -> None:
         if not app.config["DEMO_MODE"]:
             raise click.ClickException("Bloqueado. Defina DEMO_MODE=true antes de limpar dados demonstrativos.")
+        ensure_demo_database_isolated(app)
         db = get_db()
         demo_users = [int(r["id"]) for r in db.execute("SELECT id FROM users WHERE is_demo=1")]
         demo_tickets = [int(r["id"]) for r in db.execute(
