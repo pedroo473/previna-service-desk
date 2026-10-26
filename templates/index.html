@@ -1,95 +1,80 @@
 {% extends 'base.html' %}
-{% block title %}{% if current_user['role'] == 'ti' %}Painel da TI{% else %}Meus chamados{% endif %} | {{ app_title }}{% endblock %}
+{% block title %}{% if current_user['role'] == 'ti' %}Painel de atendimento{% else %}Meus chamados{% endif %} | {{ app_title }}{% endblock %}
 {% block content %}
 {% set is_ti = current_user['role'] == 'ti' %}
 <section class="dashboard-heading">
   <div class="dashboard-heading-copy">
     <div class="eyebrow dashboard-eyebrow"><span class="eyebrow-indicator"></span>{% if is_ti %}CENTRAL DE OPERAÇÕES{% else %}PORTAL DO SOLICITANTE{% endif %}</div>
-    <h1>{% if is_ti %}Painel de atendimento{% else %}Minhas solicitações{% endif %}</h1>
-    <p>{% if is_ti %}Acompanhe a fila, priorize demandas e mantenha os atendimentos da Previna organizados.{% else %}Abra solicitações de suporte e acompanhe a evolução de cada atendimento.{% endif %}</p>
+    <h1>{% if is_ti %}Painel de atendimento{% else %}Meus chamados{% endif %}</h1>
+    <p>{% if is_ti %}Acompanhe a fila e priorize os atendimentos da Previna.{% else %}Acompanhe seus chamados e consulte as atualizações do atendimento.{% endif %}</p>
   </div>
-  <div class="dashboard-heading-actions">
-    <span class="workspace-pill"><span class="workspace-pill-dot"></span> Ambiente interno</span>
-    <a class="button dashboard-primary-action" href="{{ url_for('new_ticket') }}"><span aria-hidden="true">＋</span> Abrir chamado</a>
-  </div>
+  {% if demo_mode %}<span class="demo-pill"><span aria-hidden="true">●</span> Ambiente de demonstração</span>{% endif %}
 </section>
 
 <section class="stats-grid dashboard-stats" aria-label="Indicadores dos chamados">
-  <article class="stat-card metric-total">
+  <a class="stat-card metric-total kpi-link {% if not status_filter %}kpi-active{% endif %}" href="{{ url_for('index', period=period) }}" aria-label="Ver todos os chamados no período selecionado">
     <div class="metric-heading"><span class="stat-label">Total de chamados</span><span class="metric-icon" aria-hidden="true">▦</span></div>
-    <strong>{{ summary.total }}</strong>
-    <span class="stat-foot">{% if is_ti %}Em toda a central{% else %}Registrados por você{% endif %}</span>
-  </article>
-  <article class="stat-card stat-open metric-open">
-    <div class="metric-heading"><span class="stat-label">Em aberto</span><span class="metric-icon" aria-hidden="true">◷</span></div>
-    <strong>{{ summary.open_count }}</strong>
-    <span class="stat-foot">Aguardando conclusão</span>
-  </article>
-  <article class="stat-card stat-progress metric-progress">
+    <strong class="metric-value" data-metric="total">{{ summary.total }}</strong><span class="stat-foot">{{ period_label }}</span>
+  </a>
+  <a class="stat-card stat-open metric-open kpi-link {% if status_filter == 'Aberto' %}kpi-active{% endif %}" href="{{ url_for('index', period=period, status='Aberto') }}" aria-label="Filtrar chamados abertos">
+    <div class="metric-heading"><span class="stat-label">Abertos</span><span class="metric-icon" aria-hidden="true">◷</span></div>
+    <strong class="metric-value" data-metric="open_count">{{ summary.open_count }}</strong><span class="stat-foot">Aguardando atendimento</span>
+  </a>
+  <a class="stat-card stat-progress metric-progress kpi-link {% if status_filter == 'Em andamento' %}kpi-active{% endif %}" href="{{ url_for('index', period=period, status='Em andamento') }}" aria-label="Filtrar chamados em andamento">
     <div class="metric-heading"><span class="stat-label">Em andamento</span><span class="metric-icon" aria-hidden="true">↗</span></div>
-    <strong>{{ summary.in_progress_count }}</strong>
-    <span class="stat-foot">Em atendimento pela TI</span>
-  </article>
-  <article class="stat-card stat-resolved metric-resolved">
-    <div class="metric-heading"><span class="stat-label">Resolvidos</span><span class="metric-icon" aria-hidden="true">✓</span></div>
-    <strong>{{ summary.resolved_count }}</strong>
-    <span class="stat-foot">Sinalizados como resolvidos</span>
-  </article>
+    <strong class="metric-value" data-metric="in_progress_count">{{ summary.in_progress_count }}</strong><span class="stat-foot">Em atendimento</span>
+  </a>
+  <a class="stat-card stat-waiting metric-waiting kpi-link {% if status_filter == 'Aguardando usuário' %}kpi-active{% endif %}" href="{{ url_for('index', period=period, status='Aguardando usuário') }}" aria-label="Filtrar chamados aguardando o solicitante">
+    <div class="metric-heading"><span class="stat-label">Aguardando usuário</span><span class="metric-icon" aria-hidden="true">◷</span></div>
+    <strong class="metric-value" data-metric="waiting_count">{{ summary.waiting_count }}</strong><span class="stat-foot">Aguardando retorno</span>
+  </a>
+  <a class="stat-card stat-resolved metric-resolved kpi-link {% if status_filter == 'finalizados' %}kpi-active{% endif %}" href="{{ url_for('index', period=period, status='finalizados') }}" aria-label="Filtrar chamados resolvidos ou encerrados">
+    <div class="metric-heading"><span class="stat-label">Resolvidos/encerrados</span><span class="metric-icon" aria-hidden="true">✓</span></div>
+    <strong class="metric-value" data-metric="resolved_closed_count">{{ summary.resolved_closed_count }}</strong><span class="stat-foot">Atendimentos finalizados</span>
+  </a>
 </section>
 
 <section class="panel dashboard-ticket-panel">
   <div class="dashboard-list-heading">
-    <div>
-      <div class="section-kicker">ACOMPANHAMENTO</div>
-      <h2>{% if is_ti %}Fila de chamados{% else %}Seus chamados{% endif %}</h2>
-      <p class="muted">{% if is_ti %}As demandas são ordenadas por status, prioridade e atualização.{% else %}Consulte o status e as últimas atualizações das suas solicitações.{% endif %}</p>
+    <div><div class="section-kicker">ACOMPANHAMENTO</div><h2>{% if is_ti %}Fila de chamados{% else %}Seus chamados{% endif %}</h2>
+      <p class="muted">Indicadores, abas e lista respeitam o período selecionado.</p>
     </div>
-    <span class="result-count"><strong>{{ tickets|length }}</strong> registro{% if tickets|length != 1 %}s{% endif %}</span>
+    <span class="result-count"><strong>{{ tickets|length }}</strong> chamado{% if tickets|length != 1 %}s{% endif %} na lista</span>
   </div>
-
-  <div class="status-shortcuts" aria-label="Filtros rápidos por status">
-    <a class="status-shortcut {% if not status_filter %}active{% endif %}" href="{{ url_for('index', q=search) if search else url_for('index') }}">Todos</a>
+  <nav class="status-shortcuts" aria-label="Filtros rápidos por status">
+    <a class="status-shortcut {% if not status_filter %}active{% endif %}" href="{{ url_for('index', period=period, q=search) }}"><span>Todos</span><span class="status-shortcut-count">{{ summary.total }}</span></a>
     {% for item in statuses %}
-    <a class="status-shortcut {% if status_filter == item %}active{% endif %}" href="{{ url_for('index', status=item, q=search) if search else url_for('index', status=item) }}">{{ item }}</a>
+      <a class="status-shortcut {% if status_filter == item %}active{% endif %}" href="{{ url_for('index', period=period, status=item, q=search) }}"><span>{{ item }}</span><span class="status-shortcut-count">{{ status_counts[item] }}</span></a>
     {% endfor %}
-  </div>
-
-  <form method="get" class="filters dashboard-filters">
+  </nav>
+  <form method="get" class="filters dashboard-filters" aria-label="Filtros da lista de chamados">
     <div class="search-wrap dashboard-search"><span aria-hidden="true">⌕</span><input type="search" name="q" value="{{ search }}" placeholder="Buscar por número, assunto, categoria{% if is_ti %} ou solicitante{% endif %}" aria-label="Pesquisar chamados"></div>
-    <select name="status" aria-label="Filtrar por status"><option value="">Todos os status</option>{% for item in statuses %}<option value="{{ item }}" {% if status_filter == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select>
+    <label class="filter-select-label">Período<select name="period" aria-label="Período dos indicadores e da lista">{% for value, label in period_options %}<option value="{{ value }}" {% if period == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label class="filter-select-label">Status<select name="status" aria-label="Filtrar por status"><option value="" {% if not status_filter %}selected{% endif %}>Todos os status</option>{% for item in statuses %}<option value="{{ item }}" {% if status_filter == item %}selected{% endif %}>{{ item }}</option>{% endfor %}<option value="finalizados" {% if status_filter == 'finalizados' %}selected{% endif %}>Resolvidos/encerrados</option></select></label>
     <button class="button button-secondary filter-submit" type="submit"><span aria-hidden="true">⌕</span> Filtrar</button>
-    {% if search or status_filter %}<a class="clear-filter" href="{{ url_for('index') }}">Limpar filtros</a>{% endif %}
+    {% if search or status_filter %}<a class="clear-filter" href="{{ url_for('index', period=period) }}">Limpar filtros</a>{% endif %}
   </form>
-
   {% if tickets %}
   <div class="table-wrap dashboard-table-wrap">
-    <table class="dashboard-table">
-      <thead><tr><th>Solicitação</th>{% if is_ti %}<th>Solicitante</th>{% endif %}<th>Categoria</th><th>Prioridade</th><th>Status</th><th>Última atualização</th></tr></thead>
-      <tbody>
-      {% for ticket in tickets %}
-        <tr>
-          <td class="ticket-cell"><a class="ticket-link dashboard-ticket-link" href="{{ url_for('ticket_detail', ticket_id=ticket['id']) }}">
-            <span class="ticket-number">#{{ ticket['id'] }}</span>
-            <span class="ticket-title-group"><strong>{{ ticket['title'] }}</strong><small>Aberto em {{ ticket['created_at']|datetime_br }}</small></span>
-          </a></td>
-          {% if is_ti %}<td><div class="requester-cell"><span class="requester-avatar">{{ ticket['requester_name'][:1]|upper }}</span><span>{{ ticket['requester_name'] }}</span></div></td>{% endif %}
-          <td><span class="category-pill">{{ ticket['category'] }}</span></td>
-          <td><span class="priority priority-{{ ticket['priority']|lower }}"><span class="badge-symbol" aria-hidden="true">{% if ticket['priority'] == 'Urgente' %}!{% elif ticket['priority'] == 'Alta' %}↑{% elif ticket['priority'] == 'Baixa' %}↓{% else %}•{% endif %}</span>{{ ticket['priority'] }}</span></td>
-          <td><span class="status status-{{ ticket['status']|replace(' ', '-')|replace('ã','a')|replace('á','a')|lower }}"><span class="badge-symbol" aria-hidden="true">{% if ticket['status'] == 'Aberto' %}●{% elif ticket['status'] == 'Em andamento' %}↗{% elif ticket['status'] == 'Aguardando usuário' %}◷{% elif ticket['status'] == 'Resolvido' %}✓{% else %}■{% endif %}</span>{{ ticket['status'] }}</span></td>
-          <td class="date-cell"><span class="date-value">{{ ticket['updated_at']|datetime_br }}</span></td>
-        </tr>
-      {% endfor %}
-      </tbody>
+    <table class="dashboard-table"><caption class="sr-only">Chamados conforme os filtros atuais</caption>
+      <thead><tr><th scope="col">Chamado</th>{% if is_ti %}<th scope="col">Solicitante</th>{% endif %}<th scope="col">Categoria</th><th scope="col">Prioridade</th><th scope="col">Status</th><th scope="col">Última atualização</th></tr></thead>
+      <tbody>{% for ticket in tickets %}<tr>
+        <td class="ticket-cell"><a class="ticket-link dashboard-ticket-link" href="{{ url_for('ticket_detail', ticket_id=ticket['id']) }}"><span class="ticket-number">#{{ ticket['id'] }}</span><span class="ticket-title-group"><strong>{{ ticket['title'] }}</strong><small>Aberto em {{ ticket['created_at']|datetime_br }}</small></span></a></td>
+        {% if is_ti %}<td><div class="requester-cell"><span class="requester-avatar" aria-hidden="true">{{ ticket['requester_name'][:1]|upper }}</span><span>{{ ticket['requester_name'] }}</span></div></td>{% endif %}
+        <td><span class="category-pill">{{ ticket['category'] }}</span></td>
+        <td><span class="priority priority-{{ ticket['priority']|lower }}"><span class="badge-symbol" aria-hidden="true">{% if ticket['priority'] == 'Urgente' %}!{% elif ticket['priority'] == 'Alta' %}↑{% elif ticket['priority'] == 'Baixa' %}↓{% else %}•{% endif %}</span>{{ ticket['priority'] }}</span></td>
+        <td><span class="status status-{{ ticket['status']|replace(' ', '-')|replace('ã','a')|replace('á','a')|lower }}"><span class="badge-symbol" aria-hidden="true">{% if ticket['status'] == 'Aberto' %}●{% elif ticket['status'] == 'Em andamento' %}↗{% elif ticket['status'] == 'Aguardando usuário' %}◷{% elif ticket['status'] == 'Resolvido' %}✓{% else %}■{% endif %}</span>{{ ticket['status'] }}</span></td>
+        <td class="date-cell"><time class="date-value" datetime="{{ ticket['updated_at'] }}">{{ ticket['updated_at']|datetime_br }}</time></td>
+      </tr>{% endfor %}</tbody>
     </table>
   </div>
   {% else %}
-  <div class="empty-state dashboard-empty-state">
-    <div class="empty-icon" aria-hidden="true">▤</div>
-    <h3>{% if search or status_filter %}Nenhum resultado encontrado{% else %}Sua fila está pronta{% endif %}</h3>
-    <p>{% if search or status_filter %}Não encontramos chamados com esses filtros. Ajuste os critérios e tente novamente.{% elif is_ti %}Quando os colaboradores registrarem solicitações, elas serão exibidas nesta lista.{% else %}Quando você registrar uma solicitação, poderá acompanhar todo o andamento por aqui.{% endif %}</p>
-    {% if search or status_filter %}<a class="button button-secondary" href="{{ url_for('index') }}">Limpar filtros</a>{% else %}<a class="button" href="{{ url_for('new_ticket') }}">＋ Abrir chamado</a>{% endif %}
+  <div class="empty-state dashboard-empty-state"><div class="empty-icon" aria-hidden="true">▤</div>
+    <h3>{% if search or status_filter %}Nenhum resultado encontrado{% else %}Nenhum chamado neste período{% endif %}</h3>
+    <p>{% if search or status_filter %}Não encontramos chamados com os filtros selecionados. Ajuste os critérios e tente novamente.{% elif is_ti %}Quando os colaboradores registrarem chamados, eles aparecerão nesta lista.{% else %}Seus chamados aparecerão aqui assim que você registrar uma solicitação.{% endif %}</p>
+    {% if search or status_filter %}<a class="button button-secondary" href="{{ url_for('index', period=period) }}">Limpar filtros</a>{% endif %}
   </div>
   {% endif %}
-  <div class="dashboard-panel-footer"><span><span class="footer-status-dot"></span> Chamados visíveis conforme seu perfil de acesso</span><span>{{ tickets|length }} item(ns) nesta visualização</span></div>
+  <div class="dashboard-panel-footer"><span><span class="footer-status-dot"></span> Chamados visíveis conforme seu perfil de acesso</span><span>{{ tickets|length }} registro(s) nesta visualização</span></div>
 </section>
 {% endblock %}
