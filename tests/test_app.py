@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from werkzeug.security import generate_password_hash
@@ -103,6 +105,106 @@ class PrevinaTicketsTestCase(unittest.TestCase):
         response = self.client.post(f"/chamados/{ticket_id}", data={"body": "O erro ocorre desde hoje cedo."}, follow_redirects=True)
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"O erro ocorre desde hoje cedo.", response.data)
+
+
+
+    def test_dashboard_metrics_are_mutually_exclusive(self) -> None:
+        with self.app.app_context():
+            from app import get_db, now_text
+            db = get_db()
+            requester = db.execute("SELECT id FROM users WHERE username = ?", ("solicitante",)).fetchone()
+            timestamp = now_text()
+            examples = (
+                ("Chamado em andamento", "Descrição.", "Rede e internet", "Normal", "Em andamento"),
+                ("Chamado encerrado", "Descrição.", "Rede e internet", "Normal", "Encerrado"),
+            )
+            for title, description, category, priority, status in examples:
+                db.execute(
+                    """INSERT INTO tickets
+                       (title,description,category,priority,status,requester_id,created_at,updated_at)
+                       VALUES(?,?,?,?,?,?,?,?)""",
+                    (title, description, category, priority, status, requester["id"], timestamp, timestamp),
+                )
+            db.commit()
+
+        self.login_as("tecnico", "SenhaSegura456")
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        metrics = {
+            name.decode(): int(value)
+            for name, value in re.findall(rb'data-metric="([^"]+)">\s*(\d+)\s*</strong>', response.data)
+        }
+        self.assertEqual(metrics["total"], 2)
+        self.assertEqual(metrics["open_count"], 0)
+        self.assertEqual(metrics["in_progress_count"], 1)
+        self.assertEqual(metrics["waiting_count"], 0)
+        self.assertEqual(metrics["resolved_closed_count"], 1)
+        self.assertEqual(
+            metrics["open_count"] + metrics["in_progress_count"] +
+            metrics["waiting_count"] + metrics["resolved_closed_count"],
+            metrics["total"],
+        )
+
+    def test_period_applies_to_metrics_and_list(self) -> None:
+        with self.app.app_context():
+            from app import get_db, now_text
+            db = get_db()
+            requester = db.execute("SELECT id FROM users WHERE username = ?", ("solicitante",)).fetchone()
+            recent = now_text()
+            old = (datetime.now() - timedelta(days=60)).isoformat(timespec="seconds")
+            examples = (
+                ("Chamado recente do período", "Descrição.", "Rede e internet", "Normal", "Aberto", recent),
+                ("Chamado antigo fora do período", "Descrição.", "Rede e internet", "Normal", "Aberto", old),
+            )
+            for title, description, category, priority, status, created in examples:
+                db.execute(
+                    """INSERT INTO tickets
+                       (title,description,category,priority,status,requester_id,created_at,updated_at)
+                       VALUES(?,?,?,?,?,?,?,?)""",
+                    (title, description, category, priority, status, requester["id"], created, created),
+                )
+            db.commit()
+
+        self.login_as("tecnico", "SenhaSegura456")
+        response = self.client.get("/?period=7d")
+        self.assertEqual(response.status_code, 200)
+        metrics = {
+            name.decode(): int(value)
+            for name, value in re.findall(rb'data-metric="([^"]+)">\s*(\d+)\s*</strong>', response.data)
+        }
+        self.assertEqual(metrics["total"], 1)
+        self.assertIn("Chamado recente do período".encode(), response.data)
+        self.assertNotIn("Chamado antigo fora do período".encode(), response.data)
+
+    def test_new_ticket_creates_notification_for_technician(self) -> None:
+        self.login_as("solicitante", "SenhaSegura123")
+        self.open_ticket("Chamado com notificação")
+        self.client.post("/logout", follow_redirects=True)
+        self.login_as("tecnico", "SenhaSegura456")
+        response = self.client.get("/api/notificacoes/resumo")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["unread_count"], 1)
+        self.assertEqual(len(payload["latest"]), 1)
+        self.assertIn("Novo chamado", payload["latest"][0]["title"])
+        self.assertIn("/notificacoes/", payload["latest"][0]["open_url"])
+
+    def test_notification_cannot_be_opened_by_another_user(self) -> None:
+        self.login_as("solicitante", "SenhaSegura123")
+        self.open_ticket("Chamado com notificação privada")
+        self.client.post("/logout", follow_redirects=True)
+        self.login_as("tecnico", "SenhaSegura456")
+        payload = self.client.get("/api/notificacoes/resumo").get_json()
+        notification_id = payload["latest"][0]["id"]
+        self.client.post("/logout", follow_redirects=True)
+        self.login_as("outra.pessoa", "SenhaSegura789")
+        response = self.client.get(f"/notificacoes/{notification_id}/abrir")
+        self.assertEqual(response.status_code, 404)
+
+    def test_notifications_page_and_summary_are_available_after_login(self) -> None:
+        self.login_as("tecnico", "SenhaSegura456")
+        self.assertEqual(self.client.get("/notificacoes").status_code, 200)
+        self.assertEqual(self.client.get("/api/notificacoes/resumo").status_code, 200)
 
 
 if __name__ == "__main__":
