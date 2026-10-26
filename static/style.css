@@ -352,3 +352,40 @@ body { font-size:14px; color:#192b42; }
  .metric-icon{width:27px;height:27px;flex:0 0 27px}.topbar-context{max-width:calc(100% - 46px)}.notification-dropdown{right:8px;width:calc(100vw - 16px)}
 }
 @media(prefers-reduced-motion:reduce){.notification-skeleton{animation:none}.kpi-link{transition:none}}
+
+
+
+/* Contraste e limites mínimos de tipografia na interface principal. */
+.app-sidebar .brand-copy small,
+.sidebar-section-title,
+.side-nav-item,
+.profile-details strong,
+.profile-details small,
+.sidebar-help-card p,
+.sidebar-help-card a,
+.topbar-breadcrumb,
+.topbar-breadcrumb strong,
+.topbar-subtitle,
+.app-footer,
+.public-footer,
+.dashboard-eyebrow,
+.section-kicker,
+.result-count,
+.status-shortcut,
+.dashboard-table th,
+.dashboard-table td,
+.ticket-title-group small,
+.category-pill,
+.dashboard-table .date-cell,
+.dashboard-panel-footer,
+.notification-meta,
+.notification-preview-date,
+.notification-dropdown-header a { font-size:13px!important; }
+.status-shortcut-count { font-size:13px; }
+.sidebar-section-title { color:#a8bbd3; }
+.profile-details small { color:#c4d1e2; }
+.app-footer,.public-footer { color:#68788d; }
+@media(max-width:390px) {
+  .side-nav-item,.dashboard-eyebrow,.section-kicker,.status-shortcut,
+  .dashboard-table th,.dashboard-table td,.dashboard-panel-footer { font-size:13px!important; }
+}
