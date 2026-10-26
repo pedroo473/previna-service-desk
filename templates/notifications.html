@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% block title %}Notificações | {{ app_title }}{% endblock %}
+{% block content %}
+<section class="notification-page-heading page-heading">
+  <div><div class="eyebrow">CENTRAL DE AVISOS</div><h1>Notificações</h1><p>Atualizações dos seus chamados e mensagens recentes.</p></div>
+  {% if unread_notification_count %}<form action="{{ url_for('mark_all_notifications_read') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-secondary" type="submit">Marcar todas como lidas</button></form>{% endif %}
+</section>
+<section class="panel notifications-panel" aria-label="Lista de notificações">
+{% if notifications %}
+  <div class="notification-list">{% for item in notifications %}
+    <article class="notification-item {% if not item['is_read'] %}notification-unread{% endif %}">
+      <span class="notification-icon notification-icon-{{ item['kind']|replace('_','-') }}" aria-hidden="true">{% if item['kind'] == 'status-changed' %}↻{% elif item['kind'] == 'comment-added' %}☷{% else %}●{% endif %}</span>
+      <div class="notification-main"><div class="notification-heading"><h2>{{ item['title'] }}</h2>{% if not item['is_read'] %}<span class="notification-new">Nova</span>{% endif %}</div>
+        <p>{{ item['message'] }}</p><div class="notification-meta"><time datetime="{{ item['created_at'] }}">{{ item['created_at']|datetime_br }}</time>{% if item['ticket_id'] %}<span>Chamado #{{ item['ticket_id'] }}</span>{% endif %}<a href="{{ url_for('open_notification', notification_id=item['id']) }}">Abrir atualização</a></div>
+      </div>
+      {% if not item['is_read'] %}<form action="{{ url_for('mark_notification_read', notification_id=item['id']) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-secondary notification-mark-read" type="submit">Marcar como lida</button></form>{% endif %}
+    </article>
+  {% endfor %}</div>
+{% else %}
+  <div class="empty-state dashboard-empty-state"><div class="empty-icon" aria-hidden="true">♧</div><h2>Nenhuma notificação</h2><p>Quando houver nova mensagem ou atualização de chamado, ela aparecerá aqui.</p></div>
+{% endif %}
+</section>
+{% endblock %}
