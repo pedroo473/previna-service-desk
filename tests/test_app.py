@@ -207,5 +207,10 @@ class PrevinaTicketsTestCase(unittest.TestCase):
         self.assertEqual(self.client.get("/api/notificacoes/resumo").status_code, 200)
 
 
+    def test_demo_seed_is_blocked_when_demo_mode_is_disabled(self) -> None:
+        result = self.app.test_cli_runner().invoke(args=["seed-demo-data"])
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("DEMO_MODE=true", result.output)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
