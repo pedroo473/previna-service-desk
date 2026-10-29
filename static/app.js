@@ -10,22 +10,53 @@
   let fetching = false;
   let audioContext = null;
   let audioEnabled = false;
+  let soundEnabled = true;
+  try { soundEnabled = localStorage.getItem("previna.notification.sound") !== "off"; }
+  catch (_error) { /* O armazenamento pode estar bloqueado pelo navegador. */ }
 
-  function unlockAudio() {
-    if (audioEnabled) return;
+  function updateSoundControl() {
+    if (!soundButton) return;
+    const label = !soundEnabled ? "Som desativado" : (audioEnabled ? "Som ativado" : "Ativar som");
+    soundButton.textContent = label;
+    soundButton.setAttribute("aria-label", label);
+    soundButton.title = !soundEnabled ? "Clique para ativar alertas sonoros" :
+      (audioEnabled ? "Clique para desativar alertas sonoros" : "Clique uma vez para liberar o som no navegador");
+    soundButton.classList.toggle("sound-muted", !soundEnabled);
+    soundButton.classList.toggle("sound-ready", soundEnabled && audioEnabled);
+  }
+
+  function unlockAudio(playTestTone = false) {
+    if (!soundEnabled) { updateSoundControl(); return; }
     try {
       const Audio = window.AudioContext || window.webkitAudioContext;
-      if (!Audio) return;
+      if (!Audio) { audioEnabled = false; updateSoundControl(); return; }
       audioContext = audioContext || new Audio();
-      if (audioContext.state === "suspended") audioContext.resume();
-      audioEnabled = true;
-    } catch (_error) { /* Som é opcional quando o navegador não permite áudio. */ }
+      const ready = audioContext.state === "suspended" ? audioContext.resume() : Promise.resolve();
+      Promise.resolve(ready).then(() => {
+        audioEnabled = Boolean(audioContext && audioContext.state === "running");
+        updateSoundControl();
+        if (playTestTone && audioEnabled) playNoticeSound();
+      }).catch(() => { audioEnabled = false; updateSoundControl(); });
+    } catch (_error) { audioEnabled = false; updateSoundControl(); }
   }
-  document.addEventListener("pointerdown", unlockAudio, { once: true });
-  document.addEventListener("keydown", unlockAudio, { once: true });
+  document.addEventListener("pointerdown", () => unlockAudio(), { once: true });
+  document.addEventListener("keydown", () => unlockAudio(), { once: true });
+
+  const soundButton = make("button", "notification-sound-toggle", "");
+  soundButton.type = "button";
+  soundButton.addEventListener("click", () => {
+    soundEnabled = !soundEnabled;
+    try { localStorage.setItem("previna.notification.sound", soundEnabled ? "on" : "off"); }
+    catch (_error) { /* A configuração permanece ativa apenas durante esta sessão. */ }
+    if (soundEnabled) unlockAudio(true);
+    else updateSoundControl();
+  });
+  const dropdownHeader = dropdown.querySelector(".notification-dropdown-header");
+  if (dropdownHeader) dropdownHeader.insertBefore(soundButton, dropdownHeader.querySelector("a"));
+  updateSoundControl();
 
   function playNoticeSound() {
-    if (!audioEnabled || !audioContext) return;
+    if (!soundEnabled || !audioEnabled || !audioContext) return;
     try {
       const oscillator = audioContext.createOscillator();
       const gain = audioContext.createGain();
