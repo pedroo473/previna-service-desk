@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block title %}Meu perfil | {{ app_title }}{% endblock %}
+{% block content %}
+<section class="page-heading form-page-heading">
+  <div>
+    <p class="eyebrow">MINHA CONTA</p>
+    <h1>Meu perfil</h1>
+    <p>Atualize seu nome de exibição e o e-mail utilizado para receber notificações.</p>
+  </div>
+  <a class="button button-secondary" href="{{ url_for('index') }}">Voltar ao painel</a>
+</section>
+<section class="form-panel profile-form-panel">
+  <form method="post" action="{{ url_for('profile') }}" class="form-stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field-block">
+      <label for="full_name">Nome completo <span class="required">*</span></label>
+      <input id="full_name" name="full_name" type="text" value="{{ profile['full_name'] }}" maxlength="100" autocomplete="name" required>
+      <small>Esse nome aparece no histórico dos chamados e nas notificações.</small>
+    </div>
+    <div class="field-row">
+      <div class="field-block">
+        <label for="username">Usuário de acesso</label>
+        <input id="username" type="text" value="{{ profile['username'] }}" readonly aria-readonly="true">
+        <small>O usuário de acesso não pode ser alterado por esta página.</small>
+      </div>
+      <div class="field-block">
+        <label for="role_label">Perfil</label>
+        <input id="role_label" type="text" value="{% if profile['role'] == 'ti' %}Atendente{% else %}Solicitante{% endif %}" readonly aria-readonly="true">
+      </div>
+    </div>
+    <div class="field-block">
+      <label for="email">E-mail para notificações</label>
+      <input id="email" name="email" type="email" value="{{ profile['email'] or '' }}" maxlength="254" autocomplete="email" placeholder="nome@empresa.com.br">
+      <small>Opcional. O envio por e-mail também depende da configuração SMTP do sistema.</small>
+    </div>
+    <div class="form-actions">
+      <a class="button button-secondary" href="{{ url_for('index') }}">Cancelar</a>
+      <button class="button" type="submit">Salvar perfil</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
