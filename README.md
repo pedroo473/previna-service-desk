@@ -76,3 +76,32 @@ O comando de seed e o de limpeza falham quando \`DEMO_MODE\` não está habilita
 ## Limites operacionais
 
 O padrão continua escutando em \`127.0.0.1\`. Não exponha diretamente à rede corporativa ou à internet sem servidor WSGI, HTTPS, regras de firewall, backups verificados e teste de implantação. O banco padrão permanece em \`instance/chamados.sqlite3\`. A migração desta fase é aditiva e não apaga usuários nem chamados existentes.
+
+## Perfil, auditoria e notificações por e-mail
+
+- Cada colaborador pode atualizar seu nome e e-mail em **Meu perfil** no menu lateral.
+- A equipe de TI pode consultar **Auditoria**, que registra eventos como login, saída, abertura de chamado, comentários, mudança de status e atualização de perfil.
+- Notificações internas funcionam sem SMTP. O envio por e-mail é opcional e só ocorre quando as configurações SMTP estão definidas.
+
+Exemplo de configuração PowerShell (não grave senhas SMTP no Git):
+
+```powershell
+$env:PREVINA_BASE_URL = "http://127.0.0.1:5000"
+$env:PREVINA_SMTP_HOST = "smtp.seu-provedor.com"
+$env:PREVINA_SMTP_PORT = "587"
+$env:PREVINA_SMTP_USERNAME = "usuario"
+$env:PREVINA_SMTP_PASSWORD = "senha-fornecida-pelo-provedor"
+$env:PREVINA_SMTP_FROM = "service-desk@empresa.com.br"
+$env:PREVINA_SMTP_USE_TLS = "true"
+$env:PREVINA_SMTP_USE_SSL = "false"
+```
+
+Substitua os valores pelos dados fornecidos pelo administrador de e-mail e reinicie o servidor. Não habilite SSL implícito e TLS simultaneamente.
+
+Para cadastrar ou alterar o e-mail de um usuário pela CLI:
+
+```powershell
+.\.venv\Scripts\python.exe -m flask --app app:create_app set-email
+```
+
+O status do envio fica salvo na notificação. Falhas SMTP não devem impedir o acesso à notificação dentro do sistema.
