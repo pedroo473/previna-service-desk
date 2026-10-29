@@ -660,13 +660,23 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         return render_template("ticket_detail.html", ticket=ticket, comments=comments,
                                is_technician=g.user["role"] == "ti")
 
-    @app.get("/notificacoes")
+    @app.route("/notificacoes", methods=["GET", "POST"])
     @login_required
     def notifications() -> Any:
-        rows = get_db().execute(
-            """SELECT n.*,t.title ticket_title FROM notifications n
-               LEFT JOIN tickets t ON t.id=n.ticket_id WHERE n.user_id=?
-               ORDER BY n.created_at DESC,n.id DESC LIMIT 100""", (g.user["id"],)
+        db = get_db()
+        if request.method == "POST":
+            db.execute("UPDATE notifications SET is_read=1,read_at=? WHERE user_id=? AND is_read=0",
+                       (now_text(), g.user["id"]))
+            db.commit()
+            flash("Todas as notificações foram marcadas como lidas.", "success")
+            return redirect(url_for("notifications"))
+        rows = db.execute(
+            """SELECT n.*,t.title ticket_title,actor.full_name actor_name
+               FROM notifications n
+               LEFT JOIN tickets t ON t.id=n.ticket_id
+               LEFT JOIN users actor ON actor.id=n.actor_user_id
+               WHERE n.user_id=? ORDER BY n.created_at DESC,n.id DESC LIMIT 200""",
+            (g.user["id"],),
         ).fetchall()
         return render_template("notifications.html", notifications=rows)
 
@@ -674,41 +684,62 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     @login_required
     def notification_summary() -> Any:
         db = get_db()
-        unread = db.execute("SELECT COUNT(*) n FROM notifications WHERE user_id=? AND is_read=0",
-                            (g.user["id"],)).fetchone()["n"]
-        rows = db.execute(
-            """SELECT id,title,message,kind,is_read,created_at FROM notifications
+        try:
+            after_id = max(0, int(request.args.get("after_id", "0")))
+        except (TypeError, ValueError):
+            after_id = 0
+        unread = int(db.execute(
+            "SELECT COUNT(*) n FROM notifications WHERE user_id=? AND is_read=0", (g.user["id"],)
+        ).fetchone()["n"] or 0)
+        latest = db.execute(
+            """SELECT id,title,message,kind,is_read,created_at,target_url FROM notifications
                WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT 8""", (g.user["id"],)
         ).fetchall()
-        return jsonify({
-            "unread_count": int(unread or 0),
-            "latest": [{
+        new_rows = db.execute(
+            """SELECT id,title,message,kind,is_read,created_at,target_url FROM notifications
+               WHERE user_id=? AND id>? ORDER BY id ASC LIMIT 10""", (g.user["id"], after_id)
+        ).fetchall() if after_id else []
+        latest_id = int(db.execute(
+            "SELECT COALESCE(MAX(id),0) FROM notifications WHERE user_id=?", (g.user["id"],)
+        ).fetchone()[0] or 0)
+        def payload(row: sqlite3.Row) -> dict[str, Any]:
+            return {
                 "id": int(row["id"]), "title": row["title"], "message": row["message"],
-                "kind": row["kind"], "is_read": bool(row["is_read"]),
-                "created_at": row["created_at"],
+                "kind": row["kind"], "is_read": bool(row["is_read"]), "created_at": row["created_at"],
                 "open_url": url_for("open_notification", notification_id=int(row["id"])),
-            } for row in rows],
+                "target_url": row["target_url"],
+            }
+        latest_payload = [payload(row) for row in latest]
+        new_payload = [payload(row) for row in new_rows]
+        return jsonify({
+            "unread_count": unread, "latest_id": latest_id,
+            "latest": latest_payload, "notifications": new_payload,
         })
 
-    @app.get("/notificacoes/<int:notification_id>/abrir")
+    @app.route("/notificacoes/<int:notification_id>/abrir", methods=["GET", "POST"])
     @login_required
     def open_notification(notification_id: int) -> Any:
         db = get_db()
-        item = db.execute("SELECT target_url FROM notifications WHERE id=? AND user_id=?",
-                          (notification_id, g.user["id"])).fetchone()
-        if item is None: abort(404)
-        db.execute("UPDATE notifications SET is_read=1 WHERE id=? AND user_id=?",
-                   (notification_id, g.user["id"]))
+        row = db.execute(
+            "SELECT target_url FROM notifications WHERE id=? AND user_id=?",
+            (notification_id, g.user["id"]),
+        ).fetchone()
+        if row is None:
+            abort(404)
+        db.execute("UPDATE notifications SET is_read=1,read_at=? WHERE id=? AND user_id=?",
+                   (now_text(), notification_id, g.user["id"]))
         db.commit()
-        target = item["target_url"] or url_for("notifications")
-        return redirect(target if target.startswith("/") and not target.startswith("//") else url_for("notifications"))
+        target = row["target_url"] or url_for("notifications")
+        if not target.startswith("/") or target.startswith("//"):
+            target = url_for("notifications")
+        return redirect(target)
 
     @app.post("/notificacoes/<int:notification_id>/lida")
     @login_required
     def mark_notification_read(notification_id: int) -> Any:
         db = get_db()
-        db.execute("UPDATE notifications SET is_read=1 WHERE id=? AND user_id=?",
-                   (notification_id, g.user["id"]))
+        db.execute("UPDATE notifications SET is_read=1,read_at=? WHERE id=? AND user_id=?",
+                   (now_text(), notification_id, g.user["id"]))
         db.commit()
         return redirect(url_for("notifications"))
 
@@ -716,10 +747,38 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     @login_required
     def mark_all_notifications_read() -> Any:
         db = get_db()
-        db.execute("UPDATE notifications SET is_read=1 WHERE user_id=? AND is_read=0", (g.user["id"],))
+        db.execute("UPDATE notifications SET is_read=1,read_at=? WHERE user_id=? AND is_read=0",
+                   (now_text(), g.user["id"]))
         db.commit()
         flash("Notificações marcadas como lidas.", "success")
         return redirect(url_for("notifications"))
+
+    @app.get("/auditoria")
+    @login_required
+    def audit_log() -> Any:
+        if g.user["role"] != "ti":
+            abort(403)
+        rows = get_db().execute(
+            """SELECT a.*,u.full_name actor_name,u.username actor_username
+               FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_user_id
+               ORDER BY a.id DESC LIMIT 250"""
+        ).fetchall()
+        return render_template("audit.html", audit_rows=rows)
+
+    @app.cli.command("set-email")
+    @click.option("--username", prompt="Usuário de acesso")
+    @click.option("--email", prompt="Novo e-mail (deixe vazio para remover)", default="", show_default=False)
+    def set_email_command(username: str, email: str) -> None:
+        username, email = username.strip().lower(), email.strip().lower()
+        if email and (len(email) > 254 or not EMAIL_PATTERN.fullmatch(email)):
+            raise click.ClickException("Informe um e-mail válido ou deixe o campo vazio.")
+        db = get_db()
+        user = db.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+        if user is None:
+            raise click.ClickException("Usuário não encontrado.")
+        db.execute("UPDATE users SET email=? WHERE id=?", (email or None, user["id"]))
+        db.commit()
+        click.echo(f"E-mail atualizado para '{username}'." if email else f"E-mail removido de '{username}'.")
 
     @app.get("/health")
     def health() -> Any:
@@ -746,30 +805,33 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     @click.option("--name", "full_name", prompt="Nome completo")
     @click.option("--role", type=click.Choice(["solicitante", "ti"], case_sensitive=False),
                   prompt="Perfil (solicitante/ti)")
-    def create_user_command(username: str, full_name: str, role: str) -> None:
-        username, full_name, role = username.strip().lower(), full_name.strip(), role.lower()
+    @click.option("--email", default="", prompt="E-mail (opcional)", show_default=False)
+    def create_user_command(username: str, full_name: str, role: str, email: str) -> None:
+        username, full_name, role, email = username.strip().lower(), full_name.strip(), role.lower(), email.strip().lower()
         if not username or len(username) > 50 or not full_name or len(full_name) > 100:
             raise click.ClickException("Usuário e nome são obrigatórios e devem respeitar os limites de tamanho.")
+        if email and (len(email) > 254 or not EMAIL_PATTERN.fullmatch(email)):
+            raise click.ClickException("Informe um e-mail válido ou deixe o campo vazio.")
         password = click.prompt("Senha (mínimo 10 caracteres)", hide_input=True, confirmation_prompt=True)
         if len(password) < 10:
             raise click.ClickException("A senha deve ter pelo menos 10 caracteres.")
         db = get_db()
         if db.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone():
             raise click.ClickException("Esse nome de usuário já existe.")
-        db.execute("""INSERT INTO users(username,full_name,password_hash,role,active,created_at)
-                      VALUES(?,?,?,?,1,?)""",
-                   (username, full_name, generate_password_hash(password), role, now_text()))
+        db.execute("""INSERT INTO users(username,full_name,password_hash,role,active,created_at,email)
+                      VALUES(?,?,?,?,1,?,?)""",
+                   (username, full_name, generate_password_hash(password), role, now_text(), email or None))
         db.commit()
         click.echo(f"Usuário '{username}' criado com perfil '{role}'.")
 
     @app.cli.command("list-users")
     def list_users_command() -> None:
-        rows = get_db().execute("SELECT id,username,full_name,role,active FROM users ORDER BY full_name").fetchall()
+        rows = get_db().execute("SELECT id,username,full_name,role,active,email FROM users ORDER BY full_name").fetchall()
         if not rows:
             click.echo("Nenhum usuário cadastrado. Execute: flask --app app:create_app create-user")
             return
         for row in rows:
-            click.echo(f"{row['id']} | {row['username']} | {row['full_name']} | {row['role']} | ativo={row['active']}")
+            click.echo(f"{row['id']} | {row['username']} | {row['full_name']} | {row['role']} | ativo={row['active']} | e-mail={row['email'] or '(não cadastrado)'}")
 
     @app.cli.command("seed-demo-data")
     def seed_demo_data_command() -> None:
