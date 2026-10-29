@@ -201,7 +201,7 @@ class PrevinaTicketsTestCase(unittest.TestCase):
 
     def test_production_enables_secure_cookie_by_default(self) -> None:
         temp_db = str(Path(self.temp_dir.name) / "production.sqlite3")
-        with patch.dict(os.environ, {"PREVINA_ENV": "production", "FLASK_SECRET_KEY": "stable-production-test-secret"}):
+        with patch.dict(os.environ, {"PREVINA_ENV": "production", "FLASK_SECRET_KEY": "stable-production-test-secret", "SESSION_COOKIE_SECURE": "false"}):
             production_app = create_app({
                 "TESTING": True, "DATABASE": temp_db, "SECRET_KEY": "test-secret",
             })

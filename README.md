@@ -78,7 +78,7 @@ O comando de seed e o de limpeza falham quando \`DEMO_MODE\` não está habilita
 
 ## Segurança, limite de login e timestamps
 
-O limite atual bloqueia uma conta após 5 falhas em 15 minutos e bloqueia um IP após 30 falhas na mesma janela. A contagem usa a tabela de auditoria existente, portanto não exige nova tabela. Em ambiente com proxy reverso, confirme que o endereço remoto recebido pela aplicação representa corretamente o cliente; não confie em cabeçalhos encaminhados arbitrariamente.
+O limite atual bloqueia uma combinação conta/IP após 5 falhas em 15 minutos e bloqueia um IP após 30 falhas na mesma janela. A contagem usa a tabela de auditoria existente, portanto não exige nova tabela. Em ambiente com proxy reverso, confirme que o endereço remoto recebido pela aplicação representa corretamente o cliente; não confie em cabeçalhos encaminhados arbitrariamente.
 
 Os timestamps novos são gravados em UTC com offset explícito. Os valores históricos sem offset são interpretados como horário de São Paulo na apresentação e nas comparações temporais, sem conversão em lote do banco. A dependência `tzdata` fornece a base de fusos IANA em ambientes Windows sem banco de fusos do sistema.
 

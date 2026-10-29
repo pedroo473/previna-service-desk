@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 import re
 import secrets
@@ -339,7 +340,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         MAX_CONTENT_LENGTH=1 * 1024 * 1024,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
-        SESSION_COOKIE_SECURE=env_bool("SESSION_COOKIE_SECURE", app_env in {"prod", "production"}),
+        SESSION_COOKIE_SECURE=(app_env in {"prod", "production"} or env_bool("SESSION_COOKIE_SECURE", False)),
         WTF_CSRF_TIME_LIMIT=3600,
         PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
         DEMO_MODE=env_bool("DEMO_MODE", False),
@@ -441,16 +442,20 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             username = request.form.get("username", "").strip().lower()[:50]
             password = request.form.get("password", "")
             db = get_db()
-            account_hash = hashlib.sha256(username.encode("utf-8")).hexdigest()[:24]
+            account_hash = hmac.new(
+                str(current_app.config["SECRET_KEY"]).encode("utf-8"),
+                username.encode("utf-8"), hashlib.sha256,
+            ).hexdigest()[:24]
             window_start = (datetime.now(timezone.utc) - timedelta(minutes=LOGIN_WINDOW_MINUTES)).timestamp()
+            remote_ip = (request.remote_addr or "")[:64]
             recent = db.execute(
-                """SELECT SUM(CASE WHEN ip_address=? THEN 1 ELSE 0 END) ip_total,
+                """SELECT COUNT(*) total,
                           SUM(CASE WHEN description LIKE ? THEN 1 ELSE 0 END) account_total
                    FROM audit_logs
-                   WHERE event_type='login_failed' AND utc_epoch(created_at)>=?""",
-                ((request.remote_addr or "")[:64], f"%account_hash={account_hash}%", window_start),
+                   WHERE event_type='login_failed' AND ip_address=? AND utc_epoch(created_at)>=?""",
+                (f"%account_hash={account_hash}%", remote_ip, window_start),
             ).fetchone()
-            ip_failures = int(recent["ip_total"] or 0)
+            ip_failures = int(recent["total"] or 0)
             account_failures = int(recent["account_total"] or 0)
             if ip_failures >= LOGIN_MAX_IP_FAILURES or account_failures >= LOGIN_MAX_ACCOUNT_FAILURES:
                 audit_event(
