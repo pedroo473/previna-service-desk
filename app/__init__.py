@@ -821,7 +821,15 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                WHERE n.user_id=? ORDER BY n.created_at DESC,n.id DESC LIMIT 200""",
             (g.user["id"],),
         ).fetchall()
-        return render_template("notifications.html", notifications=rows)
+        read_count = int(db.execute(
+            "SELECT COUNT(*) n FROM notifications WHERE user_id=? AND is_read=1",
+            (g.user["id"],),
+        ).fetchone()["n"] or 0)
+        return render_template(
+            "notifications.html",
+            notifications=rows,
+            read_notification_count=read_count,
+        )
 
     @app.get("/api/notificacoes/resumo")
     @login_required
@@ -894,6 +902,51 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                    (now_text(), g.user["id"]))
         db.commit()
         flash("Notificações marcadas como lidas.", "success")
+        return redirect(url_for("notifications"))
+
+    @app.post("/notificacoes/<int:notification_id>/excluir")
+    @login_required
+    def delete_notification(notification_id: int) -> Any:
+        db = get_db()
+        try:
+            cursor = db.execute(
+                "DELETE FROM notifications WHERE id=? AND user_id=?",
+                (notification_id, g.user["id"]),
+            )
+            if cursor.rowcount != 1:
+                db.rollback()
+                abort(404)
+            db.commit()
+        except sqlite3.Error:
+            db.rollback()
+            current_app.logger.exception("Falha ao excluir a notificação #%s.", notification_id)
+            flash("Não foi possível excluir a notificação.", "error")
+            return redirect(url_for("notifications"))
+
+        flash("Notificação excluída com sucesso.", "success")
+        return redirect(url_for("notifications"))
+
+    @app.post("/notificacoes/limpar-lidas")
+    @login_required
+    def clear_read_notifications() -> Any:
+        db = get_db()
+        try:
+            cursor = db.execute(
+                "DELETE FROM notifications WHERE user_id=? AND is_read=1",
+                (g.user["id"],),
+            )
+            deleted_count = max(0, int(cursor.rowcount))
+            db.commit()
+        except sqlite3.Error:
+            db.rollback()
+            current_app.logger.exception("Falha ao limpar notificações lidas do usuário atual.")
+            flash("Não foi possível limpar as notificações lidas.", "error")
+            return redirect(url_for("notifications"))
+
+        if deleted_count == 1:
+            flash("1 notificação lida excluída.", "success")
+        else:
+            flash(f"{deleted_count} notificações lidas excluídas.", "success")
         return redirect(url_for("notifications"))
 
     @app.get("/auditoria")
