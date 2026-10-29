@@ -29,6 +29,11 @@
         {% if unread_notification_count %}<span class="side-nav-count" id="sidebar-notification-count">{{ unread_notification_count }}</span>{% endif %}
       </a>
     </nav>
+        {% if current_user['role'] == 'ti' %}
+        <a class="side-nav-item {% if request.endpoint == 'audit_log' %}active{% endif %}" href="{{ url_for('audit_log') }}" {% if request.endpoint == 'audit_log' %}aria-current="page"{% endif %}>
+          <span class="side-nav-icon" aria-hidden="true">≡</span><span>Auditoria</span>
+        </a>
+        {% endif %}
     <div class="sidebar-spacer"></div>
     <section class="sidebar-help-card" aria-label="Atalhos de suporte">
       <span class="sidebar-help-icon" aria-hidden="true">↗</span>
@@ -48,11 +53,13 @@
       {% endif %}
     </section>
     <div class="sidebar-profile">
-      <span class="profile-avatar">{{ current_user['full_name'][:1]|upper }}</span>
-      <span class="profile-details"><strong>{{ current_user['full_name'] }}</strong><small>{% if current_user['role'] == 'ti' %}Atendente{% else %}Solicitante{% endif %}</small></span>
+      <a class="sidebar-profile-open" href="{{ url_for('profile') }}" title="Abrir meu perfil" aria-label="Abrir meu perfil">
+        <span class="profile-avatar">{{ current_user['full_name'][:1]|upper }}</span>
+        <span class="profile-details"><strong>{{ current_user['full_name'] }}</strong><small>{% if current_user['role'] == 'ti' %}Atendente{% else %}Solicitante{% endif %}</small></span>
+      </a>
       <form action="{{ url_for('logout') }}" method="post" class="inline-form sidebar-logout-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="sidebar-logout" type="submit" aria-label="Sair da conta" title="Sair">↗</button>
+        <button class="sidebar-logout" type="submit" aria-label="Sair da conta" title="Sair">Sair</button>
       </form>
     </div>
   </aside>
