@@ -378,15 +378,28 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         if getattr(g, "user", None):
             return redirect(url_for("index"))
         if request.method == "POST":
-            username = request.form.get("username", "").strip().lower()
+            username = request.form.get("username", "").strip().lower()[:50]
             password = request.form.get("password", "")
-            user = get_db().execute("SELECT * FROM users WHERE username=? AND active=1", (username,)).fetchone()
+            db = get_db()
+            user = db.execute("SELECT * FROM users WHERE username=? AND active=1", (username,)).fetchone()
             if user is None or not check_password_hash(user["password_hash"], password):
+                audit_event("login_failed", f"Tentativa de login malsucedida para '{username or '(vazio)'}'.",
+                            int(user["id"]) if user else None)
                 flash("Usuário ou senha inválidos.", "error")
             else:
                 session.clear()
-                session["user_id"] = user["id"]
+                session["user_id"] = int(user["id"])
                 session.permanent = True
+                audit_event("login_success", f"{user['full_name']} entrou no sistema.", int(user["id"]))
+                notify_users(
+                    active_user_ids_by_role("ti"), actor_user_id=int(user["id"]), ticket_id=None,
+                    kind="login", title="Entrada no sistema",
+                    message=f"{user['full_name']} entrou na Central de Chamados.",
+                    target_url=url_for("audit_log"),
+                    email_subject="[Previna Service Desk] Entrada de usuário",
+                    email_body=f"Usuário: {user['username']}\nHorário: {now_text()}",
+                    exclude_actor=True,
+                )
                 destination = request.args.get("next", "") or request.form.get("next", "")
                 if destination.startswith("/") and not destination.startswith("//"):
                     return redirect(destination)
@@ -396,9 +409,65 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     @app.post("/logout")
     @login_required
     def logout() -> Any:
+        user_id = int(g.user["id"])
+        username = str(g.user["username"])
+        full_name = str(g.user["full_name"])
+        role = str(g.user["role"])
         session.clear()
+        try:
+            audit_event("logout", f"{full_name} encerrou a sessão.", user_id)
+            notify_users(
+                active_user_ids_by_role("ti"), actor_user_id=user_id, ticket_id=None,
+                kind="logout", title="Saída do sistema",
+                message=f"{full_name} encerrou a sessão ({username}).",
+                target_url=url_for("audit_log"),
+                email_subject="[Previna Service Desk] Saída de usuário",
+                email_body=f"{full_name} encerrou a sessão.\nHorário: {now_text()}\nPerfil: {role}",
+                exclude_actor=True,
+            )
+        except Exception:
+            current_app.logger.exception("Não foi possível registrar a saída; a sessão já foi encerrada.")
         flash("Sessão encerrada.", "success")
         return redirect(url_for("login"))
+
+    @app.route("/perfil", methods=["GET", "POST"])
+    @login_required
+    def profile() -> Any:
+        db = get_db()
+        user_id = int(g.user["id"])
+        if request.method == "POST":
+            full_name = request.form.get("full_name", "").strip()
+            email = request.form.get("email", "").strip().lower()
+            errors = []
+            if not full_name or len(full_name) > 100:
+                errors.append("Informe um nome completo com até 100 caracteres.")
+            if email and (len(email) > 254 or not EMAIL_PATTERN.fullmatch(email)):
+                errors.append("Informe um endereço de e-mail válido ou deixe o campo vazio.")
+            row = db.execute(
+                "SELECT id,username,full_name,role,email,active FROM users WHERE id=?", (user_id,)
+            ).fetchone()
+            if errors:
+                for message in errors:
+                    flash(message, "error")
+                profile_data = dict(row)
+                profile_data["full_name"] = full_name
+                profile_data["email"] = email
+                return render_template("profile.html", profile=profile_data), 400
+            db.execute("UPDATE users SET full_name=?,email=? WHERE id=?", (full_name, email or None, user_id))
+            db.commit()
+            try:
+                audit_event("profile_updated", f"{full_name} atualizou o próprio perfil.", user_id)
+            except Exception:
+                current_app.logger.exception("Não foi possível registrar a alteração de perfil.")
+            flash("Perfil atualizado com sucesso.", "success")
+            return redirect(url_for("profile"))
+        row = db.execute(
+            "SELECT id,username,full_name,role,email,active FROM users WHERE id=?", (user_id,)
+        ).fetchone()
+        if row is None:
+            session.clear()
+            return redirect(url_for("login"))
+        return render_template("profile.html", profile=row)
 
     @app.get("/")
     @login_required
