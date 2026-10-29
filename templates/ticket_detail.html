@@ -13,7 +13,11 @@
   </div>
   <aside class="detail-sidebar">
     <section class="panel side-panel"><h2>Resumo</h2><dl class="summary-list"><div><dt>Solicitante</dt><dd>{{ ticket['requester_name'] }}</dd></div><div><dt>Número</dt><dd>#{{ ticket['id'] }}</dd></div><div><dt>Aberto em</dt><dd>{{ ticket['created_at']|datetime_br }}</dd></div><div><dt>Prioridade</dt><dd>{{ ticket['priority'] }}</dd></div></dl></section>
-    {% if is_technician %}<section class="panel side-panel"><h2>Gerenciar chamado</h2><p class="muted small-copy">Altere o status conforme o andamento real do atendimento.</p><form method="post" class="form-stack"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="update_status" value="1"><label for="status">Status</label><select id="status" name="status">{% for item in statuses %}<option value="{{ item }}" {% if ticket['status'] == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select><button class="button button-full" type="submit">Atualizar status</button></form></section>{% endif %}
+    {% if is_technician %}<section class="panel side-panel"><h2>Gerenciar chamado</h2><p class="muted small-copy">Altere o status conforme o andamento real do atendimento.</p><form method="post" class="form-stack"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="update_status" value="1"><label for="status">Status</label><select id="status" name="status">{% for item in statuses %}<option value="{{ item }}" {% if ticket['status'] == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select><button class="button button-full" type="submit">Atualizar status</button></form>
+      <form action="{{ url_for('delete_ticket', ticket_id=ticket['id']) }}" method="post" class="form-stack delete-ticket-form" onsubmit="return confirm('Excluir permanentemente o chamado #{{ ticket['id'] }}? Os comentários também serão removidos.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="button button-danger button-full" type="submit">Excluir chamado</button>
+      </form></section>{% endif %}
   </aside>
 </div>
 {% endblock %}

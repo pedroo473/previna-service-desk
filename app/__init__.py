@@ -660,6 +660,49 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         return render_template("ticket_detail.html", ticket=ticket, comments=comments,
                                is_technician=g.user["role"] == "ti")
 
+    @app.post("/chamados/<int:ticket_id>/excluir")
+    @login_required
+    def delete_ticket(ticket_id: int) -> Any:
+        if g.user["role"] != "ti":
+            abort(403)
+
+        db = get_db()
+        ticket = db.execute(
+            "SELECT id,title FROM tickets WHERE id=?", (ticket_id,)
+        ).fetchone()
+        if ticket is None:
+            abort(404)
+
+        actor_user_id = int(g.user["id"])
+        actor_name = str(g.user["full_name"])
+        timestamp = now_text()
+        description = f"{actor_name} excluiu o chamado #{ticket_id}: {ticket['title']}."
+        try:
+            db.execute(
+                """INSERT INTO audit_logs
+                   (actor_user_id,ticket_id,event_type,description,ip_address,user_agent,created_at)
+                   VALUES(?,?,'ticket_deleted',?,?,?,?)""",
+                (actor_user_id, ticket_id, description, (request.remote_addr or "")[:64],
+                 (request.headers.get("User-Agent") or "")[:300], timestamp),
+            )
+            db.execute(
+                """UPDATE notifications
+                   SET ticket_id=NULL, target_url=?, title='Chamado removido',
+                       message='O chamado associado a esta notificação foi excluído.'
+                   WHERE ticket_id=?""",
+                (url_for("notifications"), ticket_id),
+            )
+            db.execute("DELETE FROM tickets WHERE id=?", (ticket_id,))
+            db.commit()
+        except sqlite3.Error:
+            db.rollback()
+            current_app.logger.exception("Falha ao excluir o chamado #%s.", ticket_id)
+            flash("Não foi possível excluir o chamado. Nenhum dado foi alterado.", "error")
+            return redirect(url_for("ticket_detail", ticket_id=ticket_id))
+
+        flash(f"Chamado #{ticket_id} excluído com sucesso.", "success")
+        return redirect(url_for("index"))
+
     @app.route("/notificacoes", methods=["GET", "POST"])
     @login_required
     def notifications() -> Any:

@@ -57,7 +57,7 @@
   {% if tickets %}
   <div class="table-wrap dashboard-table-wrap">
     <table class="dashboard-table"><caption class="sr-only">Chamados conforme os filtros atuais</caption>
-      <thead><tr><th scope="col">Chamado</th>{% if is_ti %}<th scope="col">Solicitante</th>{% endif %}<th scope="col">Categoria</th><th scope="col">Prioridade</th><th scope="col">Status</th><th scope="col">Última atualização</th></tr></thead>
+      <thead><tr><th scope="col">Chamado</th>{% if is_ti %}<th scope="col">Solicitante</th>{% endif %}<th scope="col">Categoria</th><th scope="col">Prioridade</th><th scope="col">Status</th><th scope="col">Última atualização</th>{% if is_ti %}<th scope="col">Ações</th>{% endif %}</tr></thead>
       <tbody>{% for ticket in tickets %}<tr>
         <td class="ticket-cell"><a class="ticket-link dashboard-ticket-link" href="{{ url_for('ticket_detail', ticket_id=ticket['id']) }}"><span class="ticket-number">#{{ ticket['id'] }}</span><span class="ticket-title-group"><strong>{{ ticket['title'] }}</strong><small>Aberto em {{ ticket['created_at']|datetime_br }}</small></span></a></td>
         {% if is_ti %}<td><div class="requester-cell"><span class="requester-avatar" aria-hidden="true">{{ ticket['requester_name'][:1]|upper }}</span><span>{{ ticket['requester_name'] }}</span></div></td>{% endif %}
@@ -65,6 +65,12 @@
         <td><span class="priority priority-{{ ticket['priority']|lower }}"><span class="badge-symbol" aria-hidden="true">{% if ticket['priority'] == 'Urgente' %}!{% elif ticket['priority'] == 'Alta' %}↑{% elif ticket['priority'] == 'Baixa' %}↓{% else %}•{% endif %}</span>{{ ticket['priority'] }}</span></td>
         <td><span class="status status-{{ ticket['status']|replace(' ', '-')|replace('ã','a')|replace('á','a')|lower }}"><span class="badge-symbol" aria-hidden="true">{% if ticket['status'] == 'Aberto' %}●{% elif ticket['status'] == 'Em andamento' %}↗{% elif ticket['status'] == 'Aguardando usuário' %}◷{% elif ticket['status'] == 'Resolvido' %}✓{% else %}■{% endif %}</span>{{ ticket['status'] }}</span></td>
         <td class="date-cell"><time class="date-value" datetime="{{ ticket['updated_at'] }}">{{ ticket['updated_at']|datetime_br }}</time></td>
+        {% if is_ti %}<td class="ticket-actions-cell">
+          <form action="{{ url_for('delete_ticket', ticket_id=ticket['id']) }}" method="post" class="inline-form ticket-delete-form" onsubmit="return confirm('Excluir o chamado #{{ ticket['id'] }}? Esta ação é permanente e remove os comentários.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="button button-small button-danger" aria-label="Excluir chamado #{{ ticket['id'] }}" title="Excluir chamado">Excluir</button>
+          </form>
+        </td>{% endif %}
       </tr>{% endfor %}</tbody>
     </table>
   </div>
