@@ -11,7 +11,14 @@
     <article class="notification-item {% if not item['is_read'] %}notification-unread{% endif %}">
       <span class="notification-icon notification-icon-{{ item['kind']|replace('_','-') }}" aria-hidden="true">{% if item['kind'] == 'status-changed' %}↻{% elif item['kind'] == 'comment-added' %}☷{% else %}●{% endif %}</span>
       <div class="notification-main"><div class="notification-heading"><h2>{{ item['title'] }}</h2>{% if not item['is_read'] %}<span class="notification-new">Nova</span>{% endif %}</div>
-        <p>{{ item['message'] }}</p><div class="notification-meta"><time datetime="{{ item['created_at'] }}">{{ item['created_at']|datetime_br }}</time>{% if item['ticket_id'] %}<span>Chamado #{{ item['ticket_id'] }}</span>{% endif %}<a href="{{ url_for('open_notification', notification_id=item['id']) }}">Abrir atualização</a></div>
+        <p>{{ item['message'] }}</p>
+        {% if item['actor_name'] %}<p class="notification-actor">Por {{ item['actor_name'] }}</p>{% endif %}
+        <div class="notification-meta">
+          <time datetime="{{ item['created_at'] }}">{{ item['created_at']|datetime_br }}</time>
+          {% if item['ticket_id'] %}<span>Chamado #{{ item['ticket_id'] }}</span>{% endif %}
+          {% if item['email_status'] == 'sent' %}<span class="email-delivery email-sent">E-mail enviado</span>{% elif item['email_status'] == 'failed' %}<span class="email-delivery email-failed">Falha no e-mail</span>{% elif item['email_status'] == 'not_configured' %}<span class="email-delivery">SMTP não configurado</span>{% elif item['email_status'] == 'no_email' %}<span class="email-delivery">Sem e-mail cadastrado</span>{% endif %}
+          <a href="{{ url_for('open_notification', notification_id=item['id']) }}">Abrir atualização</a>
+        </div>
       </div>
       {% if not item['is_read'] %}<form action="{{ url_for('mark_notification_read', notification_id=item['id']) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-secondary notification-mark-read" type="submit">Marcar como lida</button></form>{% endif %}
     </article>
