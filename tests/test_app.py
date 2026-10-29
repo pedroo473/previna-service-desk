@@ -108,6 +108,47 @@ class PrevinaTicketsTestCase(unittest.TestCase):
 
 
 
+    def test_requester_cannot_delete_ticket(self) -> None:
+        self.login_as("solicitante", "SenhaSegura123")
+        ticket_id = self.open_ticket("Chamado sem permissão para excluir")
+        response = self.client.post(f"/chamados/{ticket_id}/excluir", follow_redirects=True)
+        self.assertEqual(response.status_code, 403)
+        with self.app.app_context():
+            from app import get_db
+            ticket = get_db().execute("SELECT id FROM tickets WHERE id=?", (ticket_id,)).fetchone()
+            self.assertIsNotNone(ticket)
+
+    def test_ti_can_delete_ticket_and_keep_audit_record(self) -> None:
+        self.login_as("solicitante", "SenhaSegura123")
+        ticket_id = self.open_ticket("Chamado para excluir")
+        self.client.post("/logout", follow_redirects=True)
+        self.login_as("tecnico", "SenhaSegura456")
+
+        response = self.client.post(f"/chamados/{ticket_id}/excluir", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(f"Chamado #{ticket_id} excluído com sucesso.".encode(), response.data)
+
+        with self.app.app_context():
+            from app import get_db
+            db = get_db()
+            ticket = db.execute("SELECT id FROM tickets WHERE id=?", (ticket_id,)).fetchone()
+            self.assertIsNone(ticket)
+            comments = db.execute("SELECT COUNT(*) amount FROM comments WHERE ticket_id=?", (ticket_id,)).fetchone()
+            self.assertEqual(int(comments["amount"]), 0)
+            notice = db.execute(
+                """SELECT title,target_url FROM notifications
+                   WHERE title='Chamado removido' AND target_url=? LIMIT 1""",
+                ("/notificacoes",),
+            ).fetchone()
+            self.assertIsNotNone(notice)
+            audit = db.execute(
+                """SELECT ticket_id,description FROM audit_logs
+                   WHERE event_type='ticket_deleted' AND description LIKE ? ORDER BY id DESC LIMIT 1""",
+                (f"%#{ticket_id}%",),
+            ).fetchone()
+            self.assertIsNotNone(audit)
+            self.assertIsNone(audit["ticket_id"])
+
     def test_dashboard_metrics_are_mutually_exclusive(self) -> None:
         with self.app.app_context():
             from app import get_db, now_text

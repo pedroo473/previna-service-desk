@@ -400,3 +400,10 @@ body { font-size:14px; color:#192b42; }
 .notification-sound-toggle.sound-muted { color:#5d6b7e;background:#f1f3f6; }
 .notification-actor { margin:0 0 7px!important;color:#52657c!important;font-size:12px!important; }
 @media(max-width:390px){.notification-dropdown-header{flex-wrap:wrap}.notification-sound-toggle{order:3}.notification-dropdown-header a{margin-left:auto}}
+
+/* Ações destrutivas de chamados */
+.button-danger{background:#b9383e;border-color:#b9383e;color:#fff}
+.button-danger:hover{background:#982c32;border-color:#982c32}
+.ticket-actions-cell{width:1%;white-space:nowrap}
+.ticket-delete-form{display:inline-flex;margin:0}
+.delete-ticket-form{margin-top:14px;padding-top:14px;border-top:1px solid #edf1f5}
