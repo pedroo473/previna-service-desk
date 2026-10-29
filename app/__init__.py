@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
+import smtplib
+import ssl
 import sqlite3
+from email.message import EmailMessage
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
 
 import click
-from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -27,6 +31,7 @@ PERIOD_OPTIONS = (
     ("30d", "Últimos 30 dias"), ("90d", "Últimos 90 dias"),
 )
 PERIOD_DAYS = {"7d": 7, "30d": 30, "90d": 90}
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -63,16 +68,48 @@ def close_db(_error: BaseException | None = None) -> None:
         connection.close()
 
 
+def migrate_database(db: sqlite3.Connection) -> None:
+    """Migra o SQLite de forma aditiva, preservando usuários e chamados."""
+    additions = {
+        "users": {"is_demo": "INTEGER NOT NULL DEFAULT 0", "email": "TEXT"},
+        "tickets": {"is_demo": "INTEGER NOT NULL DEFAULT 0"},
+        "notifications": {
+            "actor_user_id": "INTEGER REFERENCES users(id) ON DELETE SET NULL",
+            "email_status": "TEXT NOT NULL DEFAULT 'pending'",
+            "email_error": "TEXT",
+            "read_at": "TEXT",
+        },
+    }
+    for table, columns_to_add in additions.items():
+        existing = {row["name"] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        for column, definition in columns_to_add.items():
+            if column not in existing:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            ticket_id INTEGER REFERENCES tickets(id) ON DELETE SET NULL,
+            event_type TEXT NOT NULL,
+            description TEXT NOT NULL,
+            ip_address TEXT,
+            user_agent TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read, id);
+        CREATE INDEX IF NOT EXISTS idx_notifications_ticket ON notifications(ticket_id, id);
+        CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at, id);
+        CREATE INDEX IF NOT EXISTS idx_audit_event_type ON audit_logs(event_type, id);
+        """
+    )
+
+
 def init_db() -> None:
     db = get_db()
     db.executescript((PROJECT_ROOT / "schema.sql").read_text(encoding="utf-8"))
-    # Migração aditiva: mantém usuários e chamados já existentes.
-    for table in ("users", "tickets"):
-        columns = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
-        if "is_demo" not in columns:
-            db.execute(f"ALTER TABLE {table} ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC, id DESC)")
-    db.execute("CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read)")
+    migrate_database(db)
     db.commit()
 
 
@@ -81,8 +118,113 @@ def add_notification(db: sqlite3.Connection, user_id: int, ticket_id: int | None
     db.execute(
         """INSERT INTO notifications(user_id,ticket_id,kind,title,message,target_url,is_read,created_at)
            VALUES(?,?,?,?,?,?,0,?)""",
-        (user_id, ticket_id, kind, title[:120], message[:500], target_url, created_at),
+        (user_id, ticket_id, kind, title[:160], message[:500], target_url[:500], created_at),
     )
+
+
+def audit_event(event_type: str, description: str, actor_user_id: int | None = None,
+                ticket_id: int | None = None) -> None:
+    """Registra eventos relevantes sem guardar senhas ou corpo de comentários."""
+    db = get_db()
+    db.execute(
+        """INSERT INTO audit_logs(actor_user_id,ticket_id,event_type,description,ip_address,user_agent,created_at)
+           VALUES(?,?,?,?,?,?,?)""",
+        (actor_user_id, ticket_id, event_type[:60], description[:500],
+         (request.remote_addr or "")[:64], (request.headers.get("User-Agent") or "")[:300], now_text()),
+    )
+    db.commit()
+
+
+def send_email(recipient: str | None, subject: str, body: str) -> tuple[str, str | None]:
+    """Envia e-mail quando SMTP está configurado; a notificação interna não depende disso."""
+    recipient = (recipient or "").strip()
+    if not recipient:
+        return "no_email", None
+    host = str(current_app.config.get("SMTP_HOST") or "").strip()
+    sender = str(current_app.config.get("SMTP_FROM") or "").strip()
+    if not host or not sender:
+        return "not_configured", None
+    subject = re.sub(r"[\r\n]+", " ", subject)[:180]
+    port = int(current_app.config.get("SMTP_PORT", 587))
+    username = str(current_app.config.get("SMTP_USERNAME") or "").strip()
+    password = str(current_app.config.get("SMTP_PASSWORD") or "")
+    use_ssl = bool(current_app.config.get("SMTP_USE_SSL", False))
+    use_tls = bool(current_app.config.get("SMTP_USE_TLS", True)) and not use_ssl
+    try:
+        message = EmailMessage()
+        message["Subject"] = subject
+        message["From"] = sender
+        message["To"] = recipient
+        message.set_content(body)
+        if use_ssl:
+            with smtplib.SMTP_SSL(host, port, timeout=5, context=ssl.create_default_context()) as smtp:
+                if username:
+                    smtp.login(username, password)
+                smtp.send_message(message)
+        else:
+            with smtplib.SMTP(host, port, timeout=5) as smtp:
+                smtp.ehlo()
+                if use_tls:
+                    smtp.starttls(context=ssl.create_default_context())
+                    smtp.ehlo()
+                if username:
+                    smtp.login(username, password)
+                smtp.send_message(message)
+        return "sent", None
+    except Exception as exc:
+        current_app.logger.warning("Falha no envio SMTP de notificação: %s", type(exc).__name__)
+        return "failed", type(exc).__name__
+
+
+def create_notification(target_user_id: int, actor_user_id: int | None, ticket_id: int | None,
+                        kind: str, title: str, message: str, target_url: str,
+                        email_subject: str | None = None, email_body: str | None = None) -> int:
+    db = get_db()
+    recipient = db.execute(
+        "SELECT email,full_name FROM users WHERE id=? AND active=1", (target_user_id,)
+    ).fetchone()
+    if recipient is None:
+        return 0
+    timestamp = now_text()
+    cursor = db.execute(
+        """INSERT INTO notifications
+           (user_id,actor_user_id,ticket_id,kind,title,message,target_url,is_read,email_status,created_at)
+           VALUES(?,?,?,?,?,?,?,0,'pending',?)""",
+        (target_user_id, actor_user_id, ticket_id, kind[:40], title[:160], message[:500], target_url[:500], timestamp),
+    )
+    notification_id = int(cursor.lastrowid or 0)
+    db.commit()
+    body = email_body or (
+        f"Olá, {recipient['full_name']}.\n\n{message}\n\n"
+        "Acesse a Central de Chamados da Previna para consultar os detalhes."
+    )
+    base_url = str(current_app.config.get("APP_BASE_URL") or "").strip().rstrip("/")
+    if base_url and target_url.startswith("/") and not target_url.startswith("//"):
+        body += f"\n\nAcessar no sistema: {base_url}{target_url}"
+    status, error = send_email(recipient["email"], email_subject or f"[Previna Service Desk] {title}", body)
+    db.execute("UPDATE notifications SET email_status=?,email_error=? WHERE id=?",
+               (status, error, notification_id))
+    db.commit()
+    return notification_id
+
+
+def notify_users(target_user_ids: list[int], *, actor_user_id: int | None, ticket_id: int | None,
+                 kind: str, title: str, message: str, target_url: str,
+                 email_subject: str | None = None, email_body: str | None = None,
+                 exclude_actor: bool = True) -> None:
+    for user_id in sorted(set(target_user_ids)):
+        if exclude_actor and actor_user_id is not None and user_id == actor_user_id:
+            continue
+        create_notification(
+            target_user_id=user_id, actor_user_id=actor_user_id, ticket_id=ticket_id,
+            kind=kind, title=title, message=message, target_url=target_url,
+            email_subject=email_subject, email_body=email_body,
+        )
+
+
+def active_user_ids_by_role(role: str) -> list[int]:
+    rows = get_db().execute("SELECT id FROM users WHERE role=? AND active=1 ORDER BY id", (role,)).fetchall()
+    return [int(row["id"]) for row in rows]
 
 
 def backup_sqlite_database(database_path: Path) -> Path:
@@ -141,6 +283,14 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         WTF_CSRF_TIME_LIMIT=3600,
         PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
         DEMO_MODE=env_bool("DEMO_MODE", False),
+        APP_BASE_URL=os.environ.get("PREVINA_BASE_URL", "").strip().rstrip("/"),
+        SMTP_HOST=os.environ.get("PREVINA_SMTP_HOST", "").strip(),
+        SMTP_PORT=int(os.environ.get("PREVINA_SMTP_PORT", "587")),
+        SMTP_USERNAME=os.environ.get("PREVINA_SMTP_USERNAME", "").strip(),
+        SMTP_PASSWORD=os.environ.get("PREVINA_SMTP_PASSWORD", ""),
+        SMTP_FROM=os.environ.get("PREVINA_SMTP_FROM", "").strip(),
+        SMTP_USE_TLS=env_bool("PREVINA_SMTP_USE_TLS", True),
+        SMTP_USE_SSL=env_bool("PREVINA_SMTP_USE_SSL", False),
         SUPPORT_KNOWLEDGE_BASE_URL=os.environ.get("SUPPORT_KNOWLEDGE_BASE_URL", "").strip(),
         SUPPORT_ON_CALL_URL=os.environ.get("SUPPORT_ON_CALL_URL", "").strip(),
         SUPPORT_HOURS_TEXT=os.environ.get("SUPPORT_HOURS_TEXT", "").strip(),
@@ -159,7 +309,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         user_id = session.get("user_id")
         if user_id is not None:
             g.user = get_db().execute(
-                "SELECT id, username, full_name, role, active FROM users WHERE id=?", (user_id,)
+                "SELECT id, username, full_name, role, active, email FROM users WHERE id=?", (user_id,)
             ).fetchone()
             if g.user is None or not g.user["active"]:
                 session.clear()
@@ -169,10 +319,17 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     def inject_globals() -> dict[str, Any]:
         user = getattr(g, "user", None)
         unread_count = 0
+        latest_notification_id = 0
         if user:
-            unread_count = int(get_db().execute(
-                "SELECT COUNT(*) n FROM notifications WHERE user_id=? AND is_read=0", (user["id"],)
-            ).fetchone()["n"] or 0)
+            db = get_db()
+            stats = db.execute(
+                "SELECT COUNT(*) unread_count FROM notifications WHERE user_id=? AND is_read=0",
+                (user["id"],),
+            ).fetchone()
+            unread_count = int(stats["unread_count"] or 0)
+            latest_notification_id = int(db.execute(
+                "SELECT COALESCE(MAX(id),0) FROM notifications WHERE user_id=?", (user["id"],)
+            ).fetchone()[0] or 0)
         shortcuts = []
         for key, label in (
             ("SUPPORT_KNOWLEDGE_BASE_URL", "Base de conhecimento"),
@@ -183,8 +340,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         return {
             "app_title": APP_TITLE, "categories": CATEGORIES, "priorities": PRIORITIES,
             "statuses": STATUSES, "current_user": user, "unread_notification_count": unread_count,
-            "support_shortcuts": shortcuts, "support_hours_text": app.config["SUPPORT_HOURS_TEXT"],
-            "demo_mode": bool(app.config["DEMO_MODE"]),
+            "latest_notification_id": latest_notification_id, "support_shortcuts": shortcuts,
+            "support_hours_text": app.config["SUPPORT_HOURS_TEXT"], "demo_mode": bool(app.config["DEMO_MODE"]),
         }
 
     @app.template_filter("datetime_br")
@@ -207,7 +364,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     def get_visible_ticket(ticket_id: int) -> sqlite3.Row:
         row = get_db().execute(
-            """SELECT t.*,u.full_name requester_name,u.username requester_username
+            """SELECT t.*,u.full_name requester_name,u.username requester_username,u.email requester_email
                FROM tickets t JOIN users u ON u.id=t.requester_id WHERE t.id=?""", (ticket_id,)
         ).fetchone()
         if row is None:
