@@ -415,3 +415,16 @@ body { font-size:14px; color:#192b42; }
 .pagination-actions{display:flex;align-items:center;gap:8px}
 .pagination-disabled{opacity:.48;cursor:not-allowed;pointer-events:none}
 @media(max-width:520px){.pagination{align-items:flex-start;flex-direction:column;padding:15px 16px}.pagination-actions{width:100%}.pagination-actions .button{flex:1}}
+
+/* Ações de gerenciamento da central de notificações */
+.notification-page-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.notification-page-actions form,.notification-actions form{margin:0}
+.notification-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-shrink:0}
+.notification-delete{color:#b9383e;border-color:#edc9cb;background:#fff}
+.notification-delete:hover{color:#982c32;border-color:#e4aeb1;background:#fff5f5}
+@media(max-width:720px){
+  .notification-page-actions{width:100%;justify-content:flex-start}
+  .notification-page-actions form{max-width:100%}
+  .notification-actions{margin-left:46px;flex-wrap:wrap;justify-content:flex-start}
+  .notification-actions form{margin-left:0}
+}

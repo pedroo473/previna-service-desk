@@ -3,7 +3,20 @@
 {% block content %}
 <section class="notification-page-heading page-heading">
   <div><div class="eyebrow">CENTRAL DE AVISOS</div><h1>Notificações</h1><p>Atualizações dos seus chamados e mensagens recentes.</p></div>
-  {% if unread_notification_count %}<form action="{{ url_for('mark_all_notifications_read') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-secondary" type="submit">Marcar todas como lidas</button></form>{% endif %}
+  <div class="notification-page-actions">
+    {% if unread_notification_count %}
+    <form action="{{ url_for('mark_all_notifications_read') }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="button button-secondary" type="submit">Marcar todas como lidas</button>
+    </form>
+    {% endif %}
+    {% if read_notification_count %}
+    <form action="{{ url_for('clear_read_notifications') }}" method="post" onsubmit="return confirm('Excluir {{ read_notification_count }} notificação(ões) já lida(s)? Esta ação não pode ser desfeita.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="button button-danger" type="submit">Limpar lidas ({{ read_notification_count }})</button>
+    </form>
+    {% endif %}
+  </div>
 </section>
 <section class="panel notifications-panel" aria-label="Lista de notificações">
 {% if notifications %}
@@ -20,7 +33,18 @@
           <a href="{{ url_for('open_notification', notification_id=item['id']) }}">Abrir atualização</a>
         </div>
       </div>
-      {% if not item['is_read'] %}<form action="{{ url_for('mark_notification_read', notification_id=item['id']) }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-secondary notification-mark-read" type="submit">Marcar como lida</button></form>{% endif %}
+      <div class="notification-actions">
+        {% if not item['is_read'] %}
+        <form action="{{ url_for('mark_notification_read', notification_id=item['id']) }}" method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="button button-secondary notification-mark-read" type="submit">Marcar como lida</button>
+        </form>
+        {% endif %}
+        <form action="{{ url_for('delete_notification', notification_id=item['id']) }}" method="post" onsubmit="return confirm('Excluir esta notificação? Esta ação não pode ser desfeita.');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="button button-secondary button-small notification-delete" type="submit" aria-label="Excluir notificação: {{ item['title'] }}">Excluir</button>
+        </form>
+      </div>
     </article>
   {% endfor %}</div>
 {% else %}

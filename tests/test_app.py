@@ -62,6 +62,24 @@ class PrevinaTicketsTestCase(unittest.TestCase):
             self.assertIsNotNone(row)
             return int(row["id"])
 
+    def create_notification(self, username: str, title: str, is_read: bool = False) -> int:
+        with self.app.app_context():
+            from app import get_db, now_text
+            db = get_db()
+            user = db.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+            self.assertIsNotNone(user)
+            cursor = db.execute(
+                """INSERT INTO notifications
+                   (user_id,kind,title,message,target_url,is_read,created_at)
+                   VALUES(?,?,?,?,?,?,?)""",
+                (
+                    int(user["id"]), "status-changed", title, "Mensagem de teste.",
+                    "/notificacoes", 1 if is_read else 0, now_text(),
+                ),
+            )
+            db.commit()
+            return int(cursor.lastrowid)
+
     def test_health_endpoint(self) -> None:
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
@@ -348,6 +366,64 @@ class PrevinaTicketsTestCase(unittest.TestCase):
         self.login_as("outra.pessoa", "SenhaSegura789")
         response = self.client.get(f"/notificacoes/{notification_id}/abrir")
         self.assertEqual(response.status_code, 404)
+
+    def test_user_can_delete_own_notification(self) -> None:
+        notification_id = self.create_notification("solicitante", "Aviso para excluir")
+        self.login_as("solicitante", "SenhaSegura123")
+        response = self.client.post(
+            f"/notificacoes/{notification_id}/excluir", follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Notificação excluída com sucesso.".encode(), response.data)
+        with self.app.app_context():
+            from app import get_db
+            row = get_db().execute(
+                "SELECT id FROM notifications WHERE id=?", (notification_id,),
+            ).fetchone()
+            self.assertIsNone(row)
+
+    def test_user_cannot_delete_another_users_notification(self) -> None:
+        notification_id = self.create_notification("solicitante", "Aviso privado")
+        self.login_as("outra.pessoa", "SenhaSegura789")
+        response = self.client.post(f"/notificacoes/{notification_id}/excluir")
+        self.assertEqual(response.status_code, 404)
+        with self.app.app_context():
+            from app import get_db
+            db = get_db()
+            row = db.execute(
+                "SELECT user_id FROM notifications WHERE id=?", (notification_id,),
+            ).fetchone()
+            owner = db.execute(
+                "SELECT id FROM users WHERE username='solicitante'",
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(int(row["user_id"]), int(owner["id"]))
+
+    def test_clear_read_notifications_only_deletes_read_items_for_current_user(self) -> None:
+        own_read = self.create_notification("solicitante", "Aviso lido", is_read=True)
+        own_unread = self.create_notification("solicitante", "Aviso pendente", is_read=False)
+        other_read = self.create_notification("outra.pessoa", "Aviso lido de outra pessoa", is_read=True)
+        self.login_as("solicitante", "SenhaSegura123")
+        page = self.client.get("/notificacoes")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Limpar lidas".encode(), page.data)
+        self.assertIn("Excluir".encode(), page.data)
+
+        response = self.client.post("/notificacoes/limpar-lidas", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("notificação lida".encode(), response.data)
+        with self.app.app_context():
+            from app import get_db
+            db = get_db()
+            self.assertIsNone(db.execute(
+                "SELECT id FROM notifications WHERE id=?", (own_read,),
+            ).fetchone())
+            self.assertIsNotNone(db.execute(
+                "SELECT id FROM notifications WHERE id=?", (own_unread,),
+            ).fetchone())
+            self.assertIsNotNone(db.execute(
+                "SELECT id FROM notifications WHERE id=?", (other_read,),
+            ).fetchone())
 
     def test_notifications_page_and_summary_are_available_after_login(self) -> None:
         self.login_as("tecnico", "SenhaSegura456")

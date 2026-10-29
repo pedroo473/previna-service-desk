@@ -91,6 +91,7 @@ O padrão continua escutando em \`127.0.0.1\`. Não exponha diretamente à rede 
 - Cada colaborador pode atualizar seu nome e e-mail em **Meu perfil** no menu lateral.
 - A equipe de TI pode consultar **Auditoria**, que registra eventos como login, saída, abertura de chamado, comentários, mudança de status e atualização de perfil.
 - Notificações internas funcionam sem SMTP. O envio por e-mail é opcional e só ocorre quando as configurações SMTP estão definidas.
+- Cada usuário pode excluir notificações próprias e limpar em lote somente as notificações já lidas; ações usam POST com CSRF e consultas limitadas ao usuário autenticado. Chamados e auditoria não são excluídos por essas operações.
 
 Exemplo de configuração PowerShell (não grave senhas SMTP no Git):
 
