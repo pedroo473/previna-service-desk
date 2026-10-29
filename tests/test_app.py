@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import re
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from werkzeug.security import generate_password_hash
 
@@ -148,6 +150,106 @@ class PrevinaTicketsTestCase(unittest.TestCase):
             ).fetchone()
             self.assertIsNotNone(audit)
             self.assertIsNone(audit["ticket_id"])
+
+    def test_login_rate_limit_blocks_repeated_failures(self) -> None:
+        for _ in range(5):
+            response = self.client.post(
+                "/login", data={"username": "solicitante", "password": "senha-incorreta"},
+            )
+            self.assertEqual(response.status_code, 200)
+        blocked = self.client.post(
+            "/login", data={"username": "solicitante", "password": "SenhaSegura123"},
+        )
+        self.assertEqual(blocked.status_code, 429)
+
+    def test_login_rejects_external_or_ambiguous_next_redirect(self) -> None:
+        for target in ("https://evil.invalid", "//evil.invalid", "///evil.invalid", r"/\\evil.invalid", "/%2f%2fevil.invalid"):
+            with self.subTest(target=target):
+                client = self.app.test_client()
+                response = client.post(
+                    "/login",
+                    data={"username": "solicitante", "password": "SenhaSegura123", "next": target},
+                    follow_redirects=False,
+                )
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.headers.get("Location"), "/")
+
+    def test_login_allows_safe_local_next_redirect(self) -> None:
+        response = self.client.post(
+            "/login",
+            data={"username": "solicitante", "password": "SenhaSegura123", "next": "/?period=7d"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers.get("Location"), "/?period=7d")
+
+    def test_csrf_is_enforced_when_enabled(self) -> None:
+        temp_db = str(Path(self.temp_dir.name) / "csrf.sqlite3")
+        csrf_app = create_app({
+            "TESTING": True,
+            "DATABASE": temp_db,
+            "SECRET_KEY": "csrf-test-secret",
+            "WTF_CSRF_ENABLED": True,
+        })
+        response = csrf_app.test_client().post("/login", data={"username": "x", "password": "y"})
+        self.assertEqual(response.status_code, 400)
+
+    def test_production_requires_explicit_secret_key(self) -> None:
+        with patch.dict(os.environ, {"PREVINA_ENV": "production", "FLASK_SECRET_KEY": ""}):
+            with self.assertRaisesRegex(RuntimeError, "FLASK_SECRET_KEY"):
+                create_app()
+
+    def test_production_enables_secure_cookie_by_default(self) -> None:
+        temp_db = str(Path(self.temp_dir.name) / "production.sqlite3")
+        with patch.dict(os.environ, {"PREVINA_ENV": "production", "FLASK_SECRET_KEY": "stable-production-test-secret"}):
+            production_app = create_app({
+                "TESTING": True, "DATABASE": temp_db, "SECRET_KEY": "test-secret",
+            })
+        self.assertTrue(production_app.config["SESSION_COOKIE_SECURE"])
+
+    def test_timestamps_are_stored_as_utc_and_displayed_in_sao_paulo(self) -> None:
+        from app import now_text, parse_timestamp, timestamp_epoch
+        generated = parse_timestamp(now_text())
+        self.assertIsNotNone(generated)
+        self.assertEqual(generated.utcoffset(), timezone.utc.utcoffset(generated))
+        self.assertAlmostEqual(
+            timestamp_epoch("2026-10-29T15:00:00+00:00"),
+            timestamp_epoch("2026-10-29T12:00:00"),
+            places=5,
+        )
+        with self.app.app_context():
+            formatter = self.app.jinja_env.filters["datetime_br"]
+            self.assertEqual(formatter("2026-10-29T15:00:00+00:00"), "29/10/2026 às 12:00")
+            self.assertEqual(formatter("2026-10-29T12:00:00"), "29/10/2026 às 12:00")
+
+    def test_dashboard_paginates_and_preserves_full_filtered_count(self) -> None:
+        with self.app.app_context():
+            from app import get_db, now_text
+            db = get_db()
+            requester = db.execute(
+                "SELECT id FROM users WHERE username=?", ("solicitante",)
+            ).fetchone()
+            timestamp = now_text()
+            for number in range(30):
+                db.execute(
+                    """INSERT INTO tickets
+                       (title,description,category,priority,status,requester_id,created_at,updated_at)
+                       VALUES(?,?,?,?,?,?,?,?)""",
+                    (f"Ticket Pagination {number:02d}", "Descrição de teste", "Outro",
+                     "Normal", "Aberto", requester["id"], timestamp, timestamp),
+                )
+            db.commit()
+        self.login_as("tecnico", "SenhaSegura456")
+        first = self.client.get("/?q=Ticket%20Pagination&period=all")
+        self.assertEqual(first.status_code, 200)
+        self.assertIn(b"30</strong> chamados na lista", first.data)
+        self.assertIn("Página 1 de 2".encode(), first.data)
+        self.assertIn("Próxima".encode(), first.data)
+        second = self.client.get("/?q=Ticket%20Pagination&period=all&page=2")
+        self.assertEqual(second.status_code, 200)
+        self.assertIn("Página 2 de 2".encode(), second.data)
+        self.assertIn(b"Ticket Pagination 04", second.data)
+        self.assertNotIn(b"Ticket Pagination 29", second.data)
 
     def test_dashboard_metrics_are_mutually_exclusive(self) -> None:
         with self.app.app_context():
