@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}Auditoria | {{ app_title }}{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">ADMINISTRAÇÃO</p>
+    <h1>Auditoria</h1>
+    <p class="muted">Registro de acessos e ações relevantes no sistema.</p>
+  </div>
+</section>
+<section class="panel">
+  <div class="panel-heading">
+    <div><h2>Eventos recentes</h2><p class="muted">São exibidos até 250 eventos, do mais recente para o mais antigo.</p></div>
+    <span class="result-count">{{ audit_rows|length }} registro(s)</span>
+  </div>
+  <div class="table-wrap">
+    <table class="audit-table">
+      <thead><tr><th>Data/hora</th><th>Evento</th><th>Descrição</th><th>Usuário</th><th>IP</th></tr></thead>
+      <tbody>
+      {% for row in audit_rows %}
+        <tr>
+          <td>{{ row['created_at']|datetime_br }}</td>
+          <td><span class="audit-event audit-{{ row['event_type']|replace('_','-') }}">{{ row['event_type']|replace('_',' ') }}</span></td>
+          <td class="audit-description">{{ row['description'] }}</td>
+          <td>{{ row['actor_name'] or 'Usuário removido/desconhecido' }}{% if row['actor_username'] %}<span class="table-subtext">{{ row['actor_username'] }}</span>{% endif %}</td>
+          <td>{{ row['ip_address'] or '—' }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5">Ainda não há eventos registrados.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
