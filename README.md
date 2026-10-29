@@ -7,11 +7,13 @@ Aplicação de suporte em Flask + SQLite. Esta entrega consolida a Fase 0: indic
 - Login com senha em hash; solicitantes veem somente os próprios chamados e a equipe de TI vê a fila.
 - Abertura de chamados, comentários, atualização de status por atendente e registro de histórico em comentários.
 - Indicadores mutuamente exclusivos: Total, Abertos, Em andamento, Aguardando usuário e Resolvidos/encerrados.
-- Filtro único de período aplicado aos KPIs, contagens das abas e lista.
+- Filtro único de período aplicado aos KPIs e às contagens; lista paginada no servidor (25 registros por página).
 - Cards clicáveis e contagens por status.
 - Sino com contador e dropdown das notificações recentes, página completa, toasts e aviso sonoro após interação do usuário com o navegador.
 - Atalhos configuráveis da base de conhecimento, contato do plantão e horário de suporte.
-- Proteção CSRF, consultas SQL parametrizadas, cookies HTTP-only e autorização do lado do servidor.
+- Proteção CSRF, consultas SQL parametrizadas, cookies HTTP-only, foco visível por teclado e autorização do lado do servidor.
+- Limite de tentativas de login com contagem persistida na auditoria: bloqueio temporário por conta/IP.
+- Novos timestamps são gravados em UTC explícito; timestamps legados sem fuso são interpretados como horário de São Paulo e não são regravados.
 - Migração SQLite aditiva: tabelas novas e colunas demonstrativas não apagam os chamados ou usuários existentes.
 
 ## Instalação e início no Windows
@@ -64,7 +66,8 @@ O comando de seed e o de limpeza falham quando \`DEMO_MODE\` não está habilita
 ## Configuração
 
 - \`PREVINA_DATABASE\`: caminho completo do banco SQLite; use banco separado para demonstração.
-- \`FLASK_SECRET_KEY\`: segredo definido pelo administrador; se ausente, é gerado em \`instance/.secret_key\`.
+- \`FLASK_SECRET_KEY\`: segredo persistente definido pelo administrador. Em desenvolvimento, se ausente, é gerado em \`instance/.secret_key\`; em produção é obrigatório defini-lo no ambiente.
+- \`PREVINA_ENV=production\`: ativa configuração de produção; exige \`FLASK_SECRET_KEY\` e habilita cookies Secure por padrão. A aplicação deve ser servida por HTTPS.
 - \`HOST\` e \`PORT\`: host/porta na inicialização pelo \`app.py\`; padrão \`127.0.0.1:5000\`.
 - \`DEMO_MODE\`: habilita seed e limpeza demonstrativos somente com valor verdadeiro.
 - \`DEMO_SEED_PASSWORD\`: senha inicial dos usuários demonstrativos.
@@ -72,6 +75,12 @@ O comando de seed e o de limpeza falham quando \`DEMO_MODE\` não está habilita
 - \`SUPPORT_ON_CALL_URL\`: URL configurável para contato do plantão.
 - \`SUPPORT_HOURS_TEXT\`: texto com horário oficial do suporte.
 - \`SESSION_COOKIE_SECURE=true\`: habilitar atrás de HTTPS.
+
+## Segurança, limite de login e timestamps
+
+O limite atual bloqueia uma combinação conta/IP após 5 falhas em 15 minutos e bloqueia um IP após 30 falhas na mesma janela. A contagem usa a tabela de auditoria existente, portanto não exige nova tabela. Em ambiente com proxy reverso, confirme que o endereço remoto recebido pela aplicação representa corretamente o cliente; não confie em cabeçalhos encaminhados arbitrariamente.
+
+Os timestamps novos são gravados em UTC com offset explícito. Os valores históricos sem offset são interpretados como horário de São Paulo na apresentação e nas comparações temporais, sem conversão em lote do banco. A dependência `tzdata` fornece a base de fusos IANA em ambientes Windows sem banco de fusos do sistema.
 
 ## Limites operacionais
 

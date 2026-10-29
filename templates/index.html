@@ -39,7 +39,7 @@
     <div><div class="section-kicker">ACOMPANHAMENTO</div><h2>{% if is_ti %}Fila de chamados{% else %}Seus chamados{% endif %}</h2>
       <p class="muted">Indicadores, abas e lista respeitam o período selecionado.</p>
     </div>
-    <span class="result-count"><strong>{{ tickets|length }}</strong> chamado{% if tickets|length != 1 %}s{% endif %} na lista</span>
+    <span class="result-count"><strong>{{ filtered_total }}</strong> chamado{% if filtered_total != 1 %}s{% endif %} na lista</span>
   </div>
   <nav class="status-shortcuts" aria-label="Filtros rápidos por status">
     <a class="status-shortcut {% if not status_filter %}active{% endif %}" href="{{ url_for('index', period=period, q=search) }}"><span>Todos</span><span class="status-shortcut-count">{{ summary.total }}</span></a>
@@ -81,6 +81,23 @@
     {% if search or status_filter %}<a class="button button-secondary" href="{{ url_for('index', period=period) }}">Limpar filtros</a>{% endif %}
   </div>
   {% endif %}
-  <div class="dashboard-panel-footer"><span><span class="footer-status-dot"></span> Chamados visíveis conforme seu perfil de acesso</span><span>{{ tickets|length }} registro(s) nesta visualização</span></div>
+  {% if page_count > 1 %}
+  <nav class="pagination" aria-label="Paginação dos chamados">
+    <span class="pagination-info">Página {{ page }} de {{ page_count }}</span>
+    <div class="pagination-actions">
+      {% if page > 1 %}
+      <a class="button button-secondary button-small" href="{{ url_for('index', page=page-1, period=period, status=status_filter, q=search) }}" rel="prev">Anterior</a>
+      {% else %}
+      <span class="button button-secondary button-small pagination-disabled" aria-disabled="true">Anterior</span>
+      {% endif %}
+      {% if page < page_count %}
+      <a class="button button-secondary button-small" href="{{ url_for('index', page=page+1, period=period, status=status_filter, q=search) }}" rel="next">Próxima</a>
+      {% else %}
+      <span class="button button-secondary button-small pagination-disabled" aria-disabled="true">Próxima</span>
+      {% endif %}
+    </div>
+  </nav>
+  {% endif %}
+  <div class="dashboard-panel-footer"><span><span class="footer-status-dot"></span> Chamados visíveis conforme seu perfil de acesso</span><span>Exibindo {{ tickets|length }} de {{ filtered_total }} registro(s)</span></div>
 </section>
 {% endblock %}

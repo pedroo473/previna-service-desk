@@ -407,3 +407,11 @@ body { font-size:14px; color:#192b42; }
 .ticket-actions-cell{width:1%;white-space:nowrap}
 .ticket-delete-form{display:inline-flex;margin:0}
 .delete-ticket-form{margin-top:14px;padding-top:14px;border-top:1px solid #edf1f5}
+
+/* Fase 1: acessibilidade de foco e paginação */
+:where(a,button,input,select,textarea,[tabindex]):focus-visible{outline:3px solid #3787c8;outline-offset:3px}
+.pagination{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 23px;border-top:1px solid #edf1f5}
+.pagination-info{font-size:12px;color:#63788d;font-weight:600}
+.pagination-actions{display:flex;align-items:center;gap:8px}
+.pagination-disabled{opacity:.48;cursor:not-allowed;pointer-events:none}
+@media(max-width:520px){.pagination{align-items:flex-start;flex-direction:column;padding:15px 16px}.pagination-actions{width:100%}.pagination-actions .button{flex:1}}

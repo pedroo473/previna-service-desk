@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 import re
 import secrets
@@ -7,10 +9,12 @@ import smtplib
 import ssl
 import sqlite3
 from email.message import EmailMessage
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import click
 from flask import Flask, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
@@ -32,6 +36,11 @@ PERIOD_OPTIONS = (
 )
 PERIOD_DAYS = {"7d": 7, "30d": 30, "90d": 90}
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+SAO_PAULO = ZoneInfo("America/Sao_Paulo")
+LOGIN_WINDOW_MINUTES = 15
+LOGIN_MAX_ACCOUNT_FAILURES = 5
+LOGIN_MAX_IP_FAILURES = 30
+TICKETS_PAGE_SIZE = 25
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -42,7 +51,51 @@ def env_bool(name: str, default: bool = False) -> bool:
 
 
 def now_text() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    """Timestamp novo em UTC explícito; registros históricos não são regravados."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def parse_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    # Timestamps sem offset são legados e interpretados como horário de São Paulo.
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=SAO_PAULO)
+    return parsed
+
+
+def timestamp_epoch(value: str | None) -> float | None:
+    parsed = parse_timestamp(value)
+    if parsed is None:
+        return None
+    return parsed.astimezone(timezone.utc).timestamp()
+
+
+def is_safe_local_redirect(target: str | None) -> bool:
+    """Aceita somente destinos locais absolutos e rejeita variantes ambíguas."""
+    if (
+        not target or target != target.strip() or target.startswith("//")
+        or "\\" in target
+    ):
+        return False
+    if any(ord(char) < 32 or ord(char) == 127 for char in target):
+        return False
+    if re.match(r"^/(?:%2f|%5c)", target, flags=re.IGNORECASE):
+        return False
+    try:
+        parsed = urlsplit(target)
+    except ValueError:
+        return False
+    return (
+        not parsed.scheme
+        and not parsed.netloc
+        and parsed.path.startswith("/")
+        and not parsed.path.startswith("//")
+    )
 
 
 def get_db() -> sqlite3.Connection:
@@ -51,6 +104,8 @@ def get_db() -> sqlite3.Connection:
         path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(path, timeout=10)
         connection.row_factory = sqlite3.Row
+        # Normalize timestamps for comparisons without rewriting legacy records.
+        connection.create_function("utc_epoch", 1, timestamp_epoch, deterministic=True)
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=10000")
         g.db = connection
@@ -260,7 +315,13 @@ def ensure_demo_database_isolated(app: Flask) -> None:
 
 
 def create_app(test_config: dict[str, Any] | None = None) -> Flask:
-    secret = (test_config or {}).get("SECRET_KEY") or os.environ.get("FLASK_SECRET_KEY")
+    app_env = os.environ.get("PREVINA_ENV", "development").strip().lower()
+    configured_secret = os.environ.get("FLASK_SECRET_KEY", "").strip()
+    if app_env in {"prod", "production"} and not configured_secret:
+        raise RuntimeError(
+            "Em produção, configure FLASK_SECRET_KEY com um segredo persistente antes de iniciar."
+        )
+    secret = (test_config or {}).get("SECRET_KEY") or configured_secret
     if not secret:
         secret_path = PROJECT_ROOT / "instance" / ".secret_key"
         secret_path.parent.mkdir(parents=True, exist_ok=True)
@@ -279,7 +340,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         MAX_CONTENT_LENGTH=1 * 1024 * 1024,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
-        SESSION_COOKIE_SECURE=env_bool("SESSION_COOKIE_SECURE", False),
+        SESSION_COOKIE_SECURE=(app_env in {"prod", "production"} or env_bool("SESSION_COOKIE_SECURE", False)),
         WTF_CSRF_TIME_LIMIT=3600,
         PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
         DEMO_MODE=env_bool("DEMO_MODE", False),
@@ -348,10 +409,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     def datetime_br(value: str | None) -> str:
         if not value:
             return "—"
-        try:
-            return datetime.fromisoformat(value).strftime("%d/%m/%Y às %H:%M")
-        except (TypeError, ValueError):
+        parsed = parse_timestamp(value)
+        if parsed is None:
             return str(value)
+        return parsed.astimezone(SAO_PAULO).strftime("%d/%m/%Y às %H:%M")
 
     def login_required(view: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(view)
@@ -381,10 +442,36 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             username = request.form.get("username", "").strip().lower()[:50]
             password = request.form.get("password", "")
             db = get_db()
+            account_hash = hmac.new(
+                str(current_app.config["SECRET_KEY"]).encode("utf-8"),
+                username.encode("utf-8"), hashlib.sha256,
+            ).hexdigest()[:24]
+            window_start = (datetime.now(timezone.utc) - timedelta(minutes=LOGIN_WINDOW_MINUTES)).timestamp()
+            remote_ip = (request.remote_addr or "")[:64]
+            recent = db.execute(
+                """SELECT COUNT(*) total,
+                          SUM(CASE WHEN description LIKE ? THEN 1 ELSE 0 END) account_total
+                   FROM audit_logs
+                   WHERE event_type='login_failed' AND ip_address=? AND utc_epoch(created_at)>=?""",
+                (f"%account_hash={account_hash}%", remote_ip, window_start),
+            ).fetchone()
+            ip_failures = int(recent["total"] or 0)
+            account_failures = int(recent["account_total"] or 0)
+            if ip_failures >= LOGIN_MAX_IP_FAILURES or account_failures >= LOGIN_MAX_ACCOUNT_FAILURES:
+                audit_event(
+                    "login_throttled",
+                    "Tentativa de login bloqueada temporariamente pelo limite de segurança.",
+                )
+                flash("Não foi possível autenticar agora. Aguarde alguns minutos e tente novamente.", "error")
+                return render_template("login.html"), 429
+
             user = db.execute("SELECT * FROM users WHERE username=? AND active=1", (username,)).fetchone()
             if user is None or not check_password_hash(user["password_hash"], password):
-                audit_event("login_failed", f"Tentativa de login malsucedida para '{username or '(vazio)'}'.",
-                            int(user["id"]) if user else None)
+                audit_event(
+                    "login_failed",
+                    f"Tentativa de login malsucedida; account_hash={account_hash}.",
+                    int(user["id"]) if user else None,
+                )
                 flash("Usuário ou senha inválidos.", "error")
             else:
                 session.clear()
@@ -401,7 +488,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                     exclude_actor=True,
                 )
                 destination = request.args.get("next", "") or request.form.get("next", "")
-                if destination.startswith("/") and not destination.startswith("//"):
+                if is_safe_local_redirect(destination):
                     return redirect(destination)
                 return redirect(url_for("index"))
         return render_template("login.html")
@@ -490,8 +577,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         if not app.config["DEMO_MODE"]:
             base.append("COALESCE(t.is_demo,0)=0")
         if period in PERIOD_DAYS:
-            base.append("t.created_at>=?")
-            values.append((datetime.now() - timedelta(days=PERIOD_DAYS[period])).isoformat(timespec="seconds"))
+            base.append("utc_epoch(t.created_at)>=?")
+            values.append((datetime.now(timezone.utc) - timedelta(days=PERIOD_DAYS[period])).timestamp())
         where = " WHERE " + " AND ".join(base) if base else ""
         agg = db.execute(
             f"""SELECT COUNT(*) total,
@@ -522,18 +609,31 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             clauses.append("(CAST(t.id AS TEXT) LIKE ? OR t.title LIKE ? OR t.category LIKE ? OR u.full_name LIKE ?)")
             params.extend([like, like, like, like])
         list_where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        filtered_total = int(db.execute(
+            f"SELECT COUNT(*) FROM tickets t JOIN users u ON u.id=t.requester_id{list_where}",
+            params,
+        ).fetchone()[0] or 0)
+        try:
+            page = max(1, int(request.args.get("page", "1")))
+        except (TypeError, ValueError):
+            page = 1
+        page_count = max(1, (filtered_total + TICKETS_PAGE_SIZE - 1) // TICKETS_PAGE_SIZE)
+        page = min(page, page_count)
         tickets = db.execute(
             f"""SELECT t.id,t.title,t.category,t.priority,t.status,t.created_at,t.updated_at,
                        u.full_name requester_name
                 FROM tickets t JOIN users u ON u.id=t.requester_id{list_where}
                 ORDER BY CASE WHEN t.status IN ('Resolvido','Encerrado') THEN 1 ELSE 0 END,
                 CASE t.priority WHEN 'Urgente' THEN 1 WHEN 'Alta' THEN 2 WHEN 'Normal' THEN 3 ELSE 4 END,
-                t.updated_at DESC,t.id DESC""", params
+                utc_epoch(t.updated_at) DESC,t.id DESC
+                LIMIT ? OFFSET ?""",
+            [*params, TICKETS_PAGE_SIZE, (page - 1) * TICKETS_PAGE_SIZE],
         ).fetchall()
         return render_template(
             "index.html", tickets=tickets, summary=summary, status_counts=status_counts,
             status_filter=status_filter, search=search, period=period,
             period_options=PERIOD_OPTIONS, period_label=dict(PERIOD_OPTIONS)[period],
+            page=page, page_count=page_count, filtered_total=filtered_total,
         )
 
     @app.route("/chamados/novo", methods=["GET", "POST"])
