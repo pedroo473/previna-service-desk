@@ -545,13 +545,19 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             category = request.form.get("category", "")
             priority = request.form.get("priority", "Normal")
             errors = []
-            if not title or len(title) > 120: errors.append("Informe um título com até 120 caracteres.")
-            if not description or len(description) > 4000: errors.append("Descreva o problema (até 4.000 caracteres).")
-            if category not in CATEGORIES: errors.append("Selecione uma categoria válida.")
-            if priority not in PRIORITIES: errors.append("Selecione uma prioridade válida.")
+            if not title or len(title) > 120:
+                errors.append("Informe um título com até 120 caracteres.")
+            if not description or len(description) > 4000:
+                errors.append("Descreva o problema (até 4.000 caracteres).")
+            if category not in CATEGORIES:
+                errors.append("Selecione uma categoria válida.")
+            if priority not in PRIORITIES:
+                errors.append("Selecione uma prioridade válida.")
             if errors:
-                for message in errors: flash(message, "error")
+                for message in errors:
+                    flash(message, "error")
                 return render_template("new_ticket.html", form=request.form), 400
+
             timestamp = now_text()
             db = get_db()
             cursor = db.execute(
@@ -565,11 +571,23 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             techs = db.execute("SELECT id FROM users WHERE role='ti' AND active=1 AND id<>?",
                                (g.user["id"],)).fetchall()
             target = url_for("ticket_detail", ticket_id=ticket_id)
-            for tech in techs:
-                add_notification(db, int(tech["id"]), ticket_id, "ticket-created",
-                                 f"Novo chamado #{ticket_id}", f"{g.user['full_name']} abriu: {title}",
-                                 target, timestamp)
             db.commit()
+
+            audit_event("ticket_created", f"Chamado #{ticket_id} criado: {title}.", int(g.user["id"]), ticket_id)
+            create_notification(
+                target_user_id=int(g.user["id"]), actor_user_id=int(g.user["id"]), ticket_id=ticket_id,
+                kind="ticket_created", title=f"Chamado #{ticket_id} registrado",
+                message=f"Seu chamado #{ticket_id} ('{title}') foi registrado com status Aberto.",
+                target_url=target,
+                email_subject=f"[Previna Service Desk] Confirmação do chamado #{ticket_id}",
+            )
+            notify_users(
+                [int(row["id"]) for row in techs], actor_user_id=int(g.user["id"]), ticket_id=ticket_id,
+                kind="ticket_created", title=f"Novo chamado #{ticket_id}",
+                message=f"{g.user['full_name']} abriu o chamado #{ticket_id}: {title}. Prioridade: {priority}.",
+                target_url=target, email_subject=f"[Previna Service Desk] Novo chamado #{ticket_id}",
+                email_body=f"{g.user['full_name']} abriu o chamado #{ticket_id}: {title}.\nCategoria: {category}\nPrioridade: {priority}",
+            )
             flash(f"Chamado #{ticket_id} aberto com sucesso.", "success")
             return redirect(url_for("ticket_detail", ticket_id=ticket_id))
         return render_template("new_ticket.html", form={})
@@ -581,48 +599,59 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         ticket = get_visible_ticket(ticket_id)
         if request.method == "POST":
             if "update_status" in request.form:
-                if g.user["role"] != "ti": abort(403)
+                if g.user["role"] != "ti":
+                    abort(403)
                 new_status = request.form.get("status", "")
                 if new_status not in STATUSES:
                     flash("Status inválido.", "error")
                     return redirect(url_for("ticket_detail", ticket_id=ticket_id))
                 if new_status != ticket["status"]:
+                    old_status = ticket["status"]
                     timestamp = now_text()
-                    db.execute("UPDATE tickets SET status=?,updated_at=? WHERE id=?", (new_status, timestamp, ticket_id))
+                    db.execute("UPDATE tickets SET status=?,updated_at=? WHERE id=?",
+                               (new_status, timestamp, ticket_id))
                     db.execute("INSERT INTO comments(ticket_id,user_id,body,created_at) VALUES(?,?,?,?)",
                                (ticket_id, g.user["id"], f"Status alterado para: {new_status}.", timestamp))
-                    if int(ticket["requester_id"]) != int(g.user["id"]):
-                        add_notification(db, int(ticket["requester_id"]), ticket_id, "status-changed",
-                                         "Status do chamado atualizado",
-                                         f"O chamado #{ticket_id} agora está: {new_status}.",
-                                         url_for("ticket_detail", ticket_id=ticket_id), timestamp)
                     db.commit()
-                    flash("Status atualizado.", "success")
+                    audit_event("status_changed",
+                                f"Status do chamado #{ticket_id} alterado de '{old_status}' para '{new_status}'.",
+                                int(g.user["id"]), ticket_id)
+                    notify_users(
+                        [int(ticket["requester_id"])], actor_user_id=int(g.user["id"]), ticket_id=ticket_id,
+                        kind="status_changed", title=f"Atualização do chamado #{ticket_id}",
+                        message=f"O status mudou de '{old_status}' para '{new_status}'.",
+                        target_url=url_for("ticket_detail", ticket_id=ticket_id),
+                        email_subject=f"[Previna Service Desk] Atualização do chamado #{ticket_id}",
+                    )
+                    flash("Status atualizado. O solicitante foi notificado.", "success")
                 else:
                     flash("O chamado já está nesse status.", "info")
                 return redirect(url_for("ticket_detail", ticket_id=ticket_id))
+
             body = request.form.get("body", "").strip()
-            if not body: flash("Digite uma mensagem antes de enviar.", "error")
-            elif len(body) > 2000: flash("O comentário deve ter até 2.000 caracteres.", "error")
+            if not body:
+                flash("Digite uma mensagem antes de enviar.", "error")
+            elif len(body) > 2000:
+                flash("O comentário deve ter até 2.000 caracteres.", "error")
             else:
                 timestamp = now_text()
                 db.execute("INSERT INTO comments(ticket_id,user_id,body,created_at) VALUES(?,?,?,?)",
                            (ticket_id, g.user["id"], body, timestamp))
                 db.execute("UPDATE tickets SET updated_at=? WHERE id=?", (timestamp, ticket_id))
-                if g.user["role"] == "ti":
-                    recipients = db.execute("SELECT id FROM users WHERE id=? AND active=1", (ticket["requester_id"],)).fetchall()
-                else:
-                    recipients = db.execute("SELECT id FROM users WHERE role='ti' AND active=1 AND id<>?",
-                                            (g.user["id"],)).fetchall()
-                for recipient in recipients:
-                    if int(recipient["id"]) != int(g.user["id"]):
-                        add_notification(db, int(recipient["id"]), ticket_id, "comment-added",
-                                         f"Nova mensagem no chamado #{ticket_id}",
-                                         f"{g.user['full_name']} adicionou uma mensagem ao chamado “{ticket['title']}”.",
-                                         url_for("ticket_detail", ticket_id=ticket_id), timestamp)
                 db.commit()
-                flash("Comentário enviado.", "success")
+                audit_event("comment_added", f"Comentário registrado no chamado #{ticket_id}.",
+                            int(g.user["id"]), ticket_id)
+                recipients = active_user_ids_by_role("ti") if int(g.user["id"]) == int(ticket["requester_id"]) else [int(ticket["requester_id"])]
+                notify_users(
+                    recipients, actor_user_id=int(g.user["id"]), ticket_id=ticket_id,
+                    kind="comment_added", title=f"Nova mensagem no chamado #{ticket_id}",
+                    message=f"{g.user['full_name']} adicionou uma mensagem ao chamado “{ticket['title']}”.",
+                    target_url=url_for("ticket_detail", ticket_id=ticket_id),
+                    email_subject=f"[Previna Service Desk] Nova mensagem no chamado #{ticket_id}",
+                )
+                flash("Comentário enviado. A outra parte foi notificada.", "success")
                 return redirect(url_for("ticket_detail", ticket_id=ticket_id))
+
         comments = db.execute(
             """SELECT c.id,c.body,c.created_at,u.full_name author_name,u.role author_role
                FROM comments c JOIN users u ON u.id=c.user_id WHERE c.ticket_id=? ORDER BY c.id""",
