@@ -184,10 +184,15 @@ class PrevinaTicketsTestCase(unittest.TestCase):
         response = self.client.get("/api/notificacoes/resumo")
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
-        self.assertEqual(payload["unread_count"], 1)
-        self.assertEqual(len(payload["latest"]), 1)
-        self.assertIn("Novo chamado", payload["latest"][0]["title"])
-        self.assertIn("/notificacoes/", payload["latest"][0]["open_url"])
+        # Login/logout events also produce notifications; assert the ticket event
+        # specifically instead of assuming it is the only unread item.
+        self.assertGreaterEqual(payload["unread_count"], 1)
+        ticket_notice = next(
+            (item for item in payload["latest"] if "Novo chamado" in item["title"]),
+            None,
+        )
+        self.assertIsNotNone(ticket_notice)
+        self.assertIn("/notificacoes/", ticket_notice["open_url"])
 
     def test_notification_cannot_be_opened_by_another_user(self) -> None:
         self.login_as("solicitante", "SenhaSegura123")
@@ -211,6 +216,36 @@ class PrevinaTicketsTestCase(unittest.TestCase):
         result = self.app.test_cli_runner().invoke(args=["seed-demo-data"])
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("DEMO_MODE=true", result.output)
+
+
+    def test_profile_updates_name_and_email(self) -> None:
+        self.login_as("solicitante", "SenhaSegura123")
+        response = self.client.post(
+            "/perfil",
+            data={"full_name": "Solicitante Atualizado", "email": "solicitante@example.com"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Perfil atualizado com sucesso".encode(), response.data)
+        with self.app.app_context():
+            from app import get_db
+            row = get_db().execute(
+                "SELECT full_name,email FROM users WHERE username=?",
+                ("solicitante",),
+            ).fetchone()
+            self.assertEqual(row["full_name"], "Solicitante Atualizado")
+            self.assertEqual(row["email"], "solicitante@example.com")
+
+    def test_audit_log_is_restricted_to_ti(self) -> None:
+        self.login_as("solicitante", "SenhaSegura123")
+        denied = self.client.get("/auditoria")
+        self.assertEqual(denied.status_code, 403)
+        self.client.post("/logout", follow_redirects=True)
+        self.login_as("tecnico", "SenhaSegura456")
+        allowed = self.client.get("/auditoria")
+        self.assertEqual(allowed.status_code, 200)
+        self.assertIn("Auditoria".encode(), allowed.data)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
